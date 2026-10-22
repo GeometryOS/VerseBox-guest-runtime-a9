@@ -1,0 +1,39 @@
+{
+  "root": "D:\\my123\\VerseBox-master\\a9-port\\rootfs\\system\\lib64\\libart.so",
+  "search": [
+    "D:\\my123\\VerseBox-master\\a9-port\\runtime\\build\\lib",
+    "D:\\my123\\VerseBox-master\\a9-port\\runtime\\build\\bin",
+    "D:\\my123\\VerseBox-master\\a9-port\\rootfs\\system\\lib64",
+    "D:\\my123\\VerseBox-master\\a9-port\\rootfs\\vendor\\lib64"
+  ],
+  "libraries": [
+    "ld-android.so",
+    "libart.so",
+    "libbacktrace.so",
+    "libbase.so",
+    "libc++.so",
+    "libc.so",
+    "libcutils.so",
+    "libdexfile.so",
+    "libdl.so",
+    "liblog.so",
+    "liblz4.so",
+    "liblzma.so",
+    "libm.so",
+    "libmetricslogger.so",
+    "libnativebridge.so",
+    "libnativehelper.so",
+    "libnativeloader.so",
+    "libsigchain.so",
+    "libtombstoned_client.so",
+    "libunwind.so",
+    "libunwindstack.so",
+    "libutils.so",
+    "libvndksupport.so",
+    "libz.so"
+  ],
+  "missing_files": [],
+  "unresolved_strong": [],
+  "unresolved_weak": [],
+  "ok": true
+}

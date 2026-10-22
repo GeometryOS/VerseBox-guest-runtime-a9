@@ -1,0 +1,20 @@
+guest-runtime-a9
+Copyright (C) 2026 QZXStudio
+
+本仓库按目录拆分许可：
+
+- **核心客体运行时**（`runtime/`、`bridges/`、`bootstrap/`、`graphics/` 的项目补丁、
+  `native/`）：**AGPL-3.0-only**（[全文](LICENSES/AGPL-3.0-only.txt)）。
+  分发修改后的版本时需要提供对应源码；对外提供修改后的客体时，
+  需按 AGPL §13 向使用者提供对应源码。
+
+- **构建与集成工具**（`scripts/`、`prepared/` 的清单生成、宿主侧接入用的配置与示例）：
+  **MIT**（[全文](LICENSES/MIT.txt)）。可以自由地把这份客体接进自己的应用。
+
+- **`vendor/`、`graphics/framework/`**：来自 AOSP `android-9.0.0_r61` 与宿主工程的
+  共享容器层，保留 **Apache-2.0** 及文件内自带的 BSD/MIT 声明，作为独立部分分发。
+
+- **Redroid 9 镜像**（`downloads/`、`rootfs/`）：构建时获取，不随本仓库分发；
+  镜像自身的许可以其上游项目为准。
+
+根目录的这个文件只说明拆分范围；各目录下的 [LICENSES/](LICENSES/) 里是对应全文。

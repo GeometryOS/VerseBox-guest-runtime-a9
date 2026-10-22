@@ -1,0 +1,2 @@
+<!-- Host sensors are declared by a10vm-host-devices.xml; keep this image fragment path. -->
+<manifest version="1.0" type="device" />

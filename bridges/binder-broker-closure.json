@@ -1,0 +1,28 @@
+{
+  "root": "D:\\my123\\VerseBox-master\\a9-port\\bridges\\bin\\binder-broker",
+  "search": [
+    "D:\\my123\\VerseBox-master\\a9-port\\bridges\\lib",
+    "D:\\my123\\VerseBox-master\\a9-port\\runtime\\build\\lib",
+    "D:\\my123\\VerseBox-master\\a9-port\\runtime\\build\\bin",
+    "D:\\my123\\VerseBox-master\\a9-port\\rootfs\\system\\lib64",
+    "D:\\my123\\VerseBox-master\\a9-port\\rootfs\\vendor\\lib64"
+  ],
+  "libraries": [
+    "binder-broker",
+    "ld-android.so",
+    "liba9binder.so",
+    "libbase.so",
+    "libc++.so",
+    "libc.so",
+    "libcutils.so",
+    "libdl.so",
+    "liblog.so",
+    "libm.so",
+    "libutils.so",
+    "libvndksupport.so"
+  ],
+  "missing_files": [],
+  "unresolved_strong": [],
+  "unresolved_weak": [],
+  "ok": true
+}

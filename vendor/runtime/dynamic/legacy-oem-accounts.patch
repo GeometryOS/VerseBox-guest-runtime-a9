@@ -1,0 +1,34 @@
+diff --git a/bionic/libc/bionic/grp_pwd.cpp b/bionic/libc/bionic/grp_pwd.cpp
+--- a/bionic/libc/bionic/grp_pwd.cpp
++++ b/bionic/libc/bionic/grp_pwd.cpp
+@@ -37,6 +37,7 @@
+ #include <stdlib.h>
+ #include <string.h>
++#include <sys/system_properties.h>
+ #include <unistd.h>
+ 
+ #include "private/android_filesystem_config.h"
+@@ -407,11 +408,31 @@
+ // Check OEM id is within range.
+ static bool is_oem_id(id_t id) {
+-  return (((id >= AID_OEM_RESERVED_START) && (id <= AID_OEM_RESERVED_END)) ||
+-      ((id >= AID_OEM_RESERVED_2_START) && (id <= AID_OEM_RESERVED_2_END)));
++  if (((id >= AID_OEM_RESERVED_START) && (id <= AID_OEM_RESERVED_END)) ||
++      ((id >= AID_OEM_RESERVED_2_START) && (id <= AID_OEM_RESERVED_2_END))) return true;
++  // Older devices retain their pre-Android-10 OEM account range after a ROM update.
++  static const bool legacy = [] {
++    ErrnoRestorer errno_restorer;
++    char value[PROP_VALUE_MAX] = {};
++    if (__system_property_get("ro.product.first_api_level", value) == 0) return false;
++    char* end = nullptr;
++    long level = strtol(value, &end, 10);
++    return *end == '\0' && level > 0 && level < 29;
++  }();
++  if (!legacy || id < AID_OEM_RESERVED_START || id >= AID_APP_START) return false;
++  for (size_t n = 0; n < android_id_count; ++n) {
++    if (android_ids[n].aid == id) return false;
++  }
++  return true;
+ }
+ 
+ // Translate an OEM name to the corresponding user/group id.

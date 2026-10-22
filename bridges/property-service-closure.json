@@ -1,0 +1,27 @@
+{
+  "root": "D:\\my123\\VerseBox-master\\a9-port\\bridges\\bin\\property-service",
+  "search": [
+    "D:\\my123\\VerseBox-master\\a9-port\\bridges\\lib",
+    "D:\\my123\\VerseBox-master\\a9-port\\runtime\\build\\lib",
+    "D:\\my123\\VerseBox-master\\a9-port\\runtime\\build\\bin",
+    "D:\\my123\\VerseBox-master\\a9-port\\rootfs\\system\\lib64",
+    "D:\\my123\\VerseBox-master\\a9-port\\rootfs\\vendor\\lib64"
+  ],
+  "libraries": [
+    "ld-android.so",
+    "libc++.so",
+    "libc.so",
+    "libdl.so",
+    "libm.so",
+    "property-service"
+  ],
+  "missing_files": [],
+  "unresolved_strong": [],
+  "unresolved_weak": [
+    {
+      "library": "property-service",
+      "symbol": "memfd_create"
+    }
+  ],
+  "ok": true
+}

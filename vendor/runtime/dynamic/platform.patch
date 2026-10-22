@@ -1,0 +1,325 @@
+diff --git a/bionic/linker/linker_main.cpp b/bionic/linker/linker_main.cpp
+--- a/bionic/linker/linker_main.cpp
++++ b/bionic/linker/linker_main.cpp
+@@ -33,1 +33,2 @@
+ #include <sys/auxv.h>
++#include "LinkerFileStat.h"
+@@ -49,3 +49,3 @@
+-#ifdef __ANDROID__
++#ifdef A10VM_DEBUGGERD
+ #include "debuggerd/handler.h"
+ #endif
+@@ -276,1 +277,1 @@
+-  if (TEMP_FAILURE_RETRY(fstat(fd.get(), &result.file_stat)) == -1) {
++  if (TEMP_FAILURE_RETRY(linkerFileStat(fd.get(), &result.file_stat)) == -1) {
+@@ -309,3 +309,3 @@
+   // Register the debuggerd signal handler.
+-#ifdef __ANDROID__
++#ifdef A10VM_DEBUGGERD
+   debuggerd_callbacks_t callbacks = {
+@@ -458,1 +458,17 @@
++  if (exe_to_load != nullptr) {
++    // The kernel cmdline begins at the original linker argv[0]. Move the
++    // program arguments there so app_process setArgV0 updates that same block.
++    char* output = args.argv[0];
++    char* end = args.argv[args.argc - 1] + strlen(args.argv[args.argc - 1]) + 1;
++    for (int i = __libc_shared_globals()->initial_linker_arg_count; i < args.argc; ++i) {
++      size_t length = strlen(args.argv[i]) + 1;
++      memmove(output, args.argv[i], length);
++      args.argv[i] = output;
++      output += length;
++    }
++    memset(output, 0, end - output);
++    const char* guest_argv0 = getenv("A10VM_EXEC_ARGV0");
++    if (guest_argv0 != nullptr) {
++      args.argv[__libc_shared_globals()->initial_linker_arg_count] = const_cast<char*>(guest_argv0);
++    }
++  }
+   si->call_pre_init_constructors();
+@@ -688,3 +688,13 @@
+-  sonext = solist = solinker = get_libdl_info(kLinkerPath, tmp_linker_so);
++  char private_linker_path[PATH_MAX];
++  const char* linker_path = kLinkerPath;
++  if (exe_to_load != nullptr) {
++    ssize_t length = readlink("/proc/self/exe", private_linker_path, sizeof(private_linker_path) - 1);
++    if (length < 0 || static_cast<size_t>(length) >= sizeof(private_linker_path) - 1) {
++      async_safe_fatal("A10VM private linker path lookup failed");
++    }
++    private_linker_path[length] = '\0';
++    linker_path = private_linker_path;
++  }
++  sonext = solist = solinker = get_libdl_info(linker_path, tmp_linker_so);
+   g_default_namespace.add_soinfo(solinker);
+-  init_link_map_head(*solinker, kLinkerPath);
++  init_link_map_head(*solinker, solinker->get_realpath());
+diff --git a/bionic/linker/dlfcn.cpp b/bionic/linker/dlfcn.cpp
+--- a/bionic/linker/dlfcn.cpp
++++ b/bionic/linker/dlfcn.cpp
+@@ -318,1 +318,2 @@
+     __libdl_info->flags_ |= (FLAG_LINKED | FLAG_GNU_HASH);
++    __libdl_info->set_dt_flags_1(DF_1_GLOBAL | DF_1_NODELETE);
+@@ -319,3 +319,5 @@
+     __libdl_info->strtab_ = linker_si.strtab_;
+     __libdl_info->symtab_ = linker_si.symtab_;
++    __libdl_info->base = linker_si.base;
++    __libdl_info->size = linker_si.size;
+     __libdl_info->load_bias = linker_si.load_bias;
+diff --git a/bionic/linker/linker.cpp b/bionic/linker/linker.cpp
+--- a/bionic/linker/linker.cpp
++++ b/bionic/linker/linker.cpp
+@@ -62,1 +62,2 @@
+ #include "linker.h"
++#include "LinkerFileStat.h"
+@@ -152,1 +153,1 @@
+-  if (stat(path, &s) != 0) {
++  if (linkerPathStat(path, &s) != 0) {
+@@ -427,0 +428,29 @@
++// APK native files have packaging names; introspection must expose the guest ABI names.
++static const char* guest_library_name(soinfo* si) {
++  const char* physical = si->get_realpath();
++  const char* host = getenv("A10VM_HOST_ROOT");
++  const char* root = getenv("A10VM_ROOTFS");
++  if (host == nullptr || root == nullptr ||
++      strncmp(physical, host, strlen(host)) != 0 || physical[strlen(host)] != '/') {
++    return physical;
++  }
++  static std::unordered_map<std::string, std::string> names;
++  auto found = names.find(physical);
++  if (found != names.end()) return found->second.c_str();
++  const char* soname = si->get_soname();
++  std::string logical;
++  if (si == solist_get_head()) logical = "/system/bin/linker64";
++  else if (soname != nullptr && strchr(soname, '/') == nullptr) {
++    logical = std::string("/system/lib64/") + soname;
++  } else return physical;
++  struct stat actual, alias;
++  if (linkerPathStat(physical, &actual) != 0) return physical;
++  const char* runtime = getenv("ANDROID_RUNTIME_ROOT");
++  if (si != solist_get_head() && runtime != nullptr && runtime[0] == '/' && soname != nullptr) {
++    std::string candidate = std::string(runtime) + "/lib64/" + soname;
++    if (linkerPathStat(candidate.c_str(), &alias) == 0 &&
++        actual.st_dev == alias.st_dev && actual.st_ino == alias.st_ino) logical = std::move(candidate);
++  }
++  if (linkerPathStat(logical.c_str(), &alias) != 0 ||
++      actual.st_dev != alias.st_dev || actual.st_ino != alias.st_ino) return physical;
++  return names.emplace(physical, std::move(logical)).first->second.c_str();
++}
++
+@@ -435,1 +464,1 @@
+-    dl_info.dlpi_name = si->link_map_head.l_name;
++    dl_info.dlpi_name = guest_library_name(si);
+@@ -1281,1 +1311,1 @@
+-  if (TEMP_FAILURE_RETRY(fstat(task->get_fd(), &file_stat)) != 0) {
++  if (TEMP_FAILURE_RETRY(linkerFileStat(task->get_fd(), &file_stat)) != 0) {
+@@ -2304,1 +2333,1 @@
+-  info->dli_fname = si->get_realpath();
++  info->dli_fname = guest_library_name(si);
+@@ -4085,36 +4085,7 @@
+-static std::string get_ld_config_file_path(const char* executable_path) {
++static std::string get_ld_config_file_path(const char*) {
++  const char* private_config = getenv("A10VM_LD_CONFIG");
++  if (private_config != nullptr && private_config[0] == '/' && file_exists(private_config)) {
++    return private_config;
++  }
++  async_safe_fatal("A10VM_LD_CONFIG requires an existing absolute private configuration");
+-#ifdef USE_LD_CONFIG_FILE
+-  // This is a debugging/testing only feature. Must not be available on
+-  // production builds.
+-  const char* ld_config_file_env = getenv("LD_CONFIG_FILE");
+-  if (ld_config_file_env != nullptr && file_exists(ld_config_file_env)) {
+-    return ld_config_file_env;
+-  }
+-#endif
+-
+-  std::string path = get_ld_config_file_apex_path(executable_path);
+-  if (!path.empty()) {
+-    if (file_exists(path.c_str())) {
+-      return path;
+-    }
+-    DL_WARN("Warning: couldn't read config file \"%s\" for \"%s\"",
+-            path.c_str(), executable_path);
+-  }
+-
+-  path = kLdConfigArchFilePath;
+-  if (file_exists(path.c_str())) {
+-    return path;
+-  }
+-
+-  path = get_ld_config_file_vndk_path();
+-  if (file_exists(path.c_str())) {
+-    return path;
+-  }
+-
+-  return kLdConfigFilePath;
+ }
+@@ -4143,1 +4143,1 @@
+-      DL_WARN("Warning: couldn't read \"%s\" for \"%s\" (using default configuration instead): %s",
++      DL_WARN("Warning: couldn't read private config \"%s\" for \"%s\": %s",
+@@ -4153,3 +4159,6 @@
+   if (config == nullptr) {
+-    return init_default_namespace_no_config(g_is_asan);
++    async_safe_fatal("A10VM private linker configuration was rejected: "
++                     "config=%s executable=%s reason=%s",
++                     ld_config_file_path.c_str(), executable_path,
++                     error_msg.empty() ? "no matching executable section" : error_msg.c_str());
+   }
+diff --git a/bionic/linker/linker_config.cpp b/bionic/linker/linker_config.cpp
+--- a/bionic/linker/linker_config.cpp
++++ b/bionic/linker/linker_config.cpp
+@@ -36,1 +36,4 @@
+ #include "linker_utils.h"
++#include "GuestPaths.h"
++#include "LinkerFileStat.h"
++#include <fcntl.h>
++#include <sys/stat.h>
+@@ -182,1 +185,18 @@
++static bool config_matches_binary(const char* binary_path, const std::string& directory) {
++  if (file_is_under_dir(binary_path, directory)) return true;
++  // Execute-only install directories and bind aliases may retain different path names.
++  struct stat expected;
++  if (linkerPathStat(directory.c_str(), &expected) != 0 || !S_ISDIR(expected.st_mode)) return false;
++  std::string parent = dirname(binary_path);
++  while (parent != "/" && parent != ".") {
++    struct stat actual;
++    if (linkerPathStat(parent.c_str(), &actual) == 0 &&
++        actual.st_dev == expected.st_dev && actual.st_ino == expected.st_ino) return true;
++    std::string next = dirname(parent.c_str());
++    if (next == parent) break;
++    parent = std::move(next);
++  }
++  return false;
++}
++
+ static bool parse_config_file(const char* ld_config_file_path,
+@@ -196,1 +216,10 @@
++  // /proc fd links expose guest paths; configuration directories use physical paths.
++  char physical_binary[PATH_MAX];
++  const char* config_binary = guestPath(AT_FDCWD, binary_realpath, physical_binary);
++  if (config_binary == nullptr) {
++    *error_msg = std::string("error resolving executable \"") + binary_realpath +
++                 "\": " + strerror(errno);
++    return false;
++  }
++
+   ConfigParser cp(std::move(content));
+@@ -214,3 +243,5 @@
+     if (result == ConfigParser::kSection || result == ConfigParser::kEndOfFile) {
++      *error_msg = create_error_msg(ld_config_file_path, cp.lineno(),
++          std::string("no dir section matches executable \"") + config_binary + "\"");
+       return false;
+     }
+@@ -265,1 +296,1 @@
+-      if (file_is_under_dir(binary_realpath, resolved_path)) {
++      if (config_matches_binary(config_binary, resolved_path)) {
+diff --git a/bionic/linker/linker_phdr.cpp b/bionic/linker/linker_phdr.cpp
+--- a/bionic/linker/linker_phdr.cpp
++++ b/bionic/linker/linker_phdr.cpp
+@@ -29,1 +29,2 @@
+ #include "linker_phdr.h"
++#include "LinkerFileStat.h"
+@@ -138,1 +138,3 @@
+-#define PFLAGS_TO_PROT(x)            (MAYBE_MAP_FLAG((x), PF_X, PROT_EXEC) | \
++// Guest native runtimes inspect instructions when installing their own hooks.
++// Keep executable segments readable, without adding write access.
++#define PFLAGS_TO_PROT(x)            (MAYBE_MAP_FLAG((x), PF_X, PROT_EXEC | PROT_READ) | \
+@@ -893,1 +896,1 @@
+-  if (TEMP_FAILURE_RETRY(fstat(fd, &file_stat)) != 0) {
++  if (TEMP_FAILURE_RETRY(linkerFileStat(fd, &file_stat)) != 0) {
+diff --git a/bionic/linker/linker_utils.cpp b/bionic/linker/linker_utils.cpp
+--- a/bionic/linker/linker_utils.cpp
++++ b/bionic/linker/linker_utils.cpp
+@@ -35,1 +35,2 @@
+ #include "android-base/strings.h"
++#include "GuestPaths.h"
++#include "LinkerFileStat.h"
+@@ -211,1 +212,6 @@
+     const char* original_path = path.c_str();
++    // Namespace paths and fd-derived library names must use the same guest coordinates.
++    if (guestPhysicalPath(original_path)) {
++      original_path += strlen(guestRoot());
++      if (!original_path[0]) original_path = "/";
++    }
+@@ -212,1 +219,1 @@
+-      if (stat(resolved_path, &s) == -1) {
++      if (linkerPathStat(resolved_path, &s) == -1) {
+@@ -240,1 +247,1 @@
+-        if (stat(normalized_path.c_str(), &s) == 0 && S_ISDIR(s.st_mode)) {
++        if (linkerPathStat(normalized_path.c_str(), &s) == 0 && S_ISDIR(s.st_mode)) {
+diff --git a/build/tools/fs_config/fs_config_generator.py b/build/tools/fs_config/fs_config_generator.py
+--- a/build/tools/fs_config/fs_config_generator.py
++++ b/build/tools/fs_config/fs_config_generator.py
+@@ -14,1 +14,1 @@
+-import ConfigParser
++import configparser as ConfigParser
+@@ -481,1 +481,1 @@
+-            for k, v in self._oem_ranges.iteritems()
++            for k, v in self._oem_ranges.items()
+@@ -494,5 +494,5 @@
+-            if Utils.in_any_range(aid, self._oem_ranges):
++            if Utils.in_any_range(int(aid, 0), self._oem_ranges):
+                 name = self._aid_value_to_name[aid]
+                 raise ValueError(
+                     'AID "%s" value: %u within reserved OEM Range: "%s"' %
+-                    (name, aid, str(self._oem_ranges)))
++                    (name, int(aid, 0), str(self._oem_ranges)))
+@@ -1218,15 +1218,15 @@
+-        print AIDArrayGen._GENERATED
+-        print
+-        print AIDArrayGen._INCLUDE
+-        print
+-        print AIDArrayGen._STRUCT_FS_CONFIG % max_name_length
+-        print
+-        print AIDArrayGen._OPEN_ID_ARRAY
++        print(AIDArrayGen._GENERATED)
++        print()
++        print(AIDArrayGen._INCLUDE)
++        print()
++        print(AIDArrayGen._STRUCT_FS_CONFIG % max_name_length)
++        print()
++        print(AIDArrayGen._OPEN_ID_ARRAY)
+ 
+         for aid in hdr.aids:
+-            print AIDArrayGen._ID_ENTRY % (aid.friendly, aid.identifier)
++            print(AIDArrayGen._ID_ENTRY % (aid.friendly, aid.identifier))
+ 
+-        print AIDArrayGen._CLOSE_FILE_STRUCT
+-        print
+-        print AIDArrayGen._COUNT
+-        print
++        print(AIDArrayGen._CLOSE_FILE_STRUCT)
++        print()
++        print(AIDArrayGen._COUNT)
++        print()
+@@ -1274,9 +1274,9 @@
+-        print OEMAidGen._GENERATED
++        print(OEMAidGen._GENERATED)
+ 
+-        print OEMAidGen._FILE_IFNDEF_DEFINE
++        print(OEMAidGen._FILE_IFNDEF_DEFINE)
+ 
+         for aid in parser.aids:
+             self._print_aid(aid)
+-            print
++            print()
+ 
+-        print OEMAidGen._FILE_ENDIF
++        print(OEMAidGen._FILE_ENDIF)
+@@ -1294,4 +1294,4 @@
+-            print OEMAidGen._FILE_COMMENT % found_file
++            print(OEMAidGen._FILE_COMMENT % found_file)
+             self._old_file = found_file
+ 
+-        print OEMAidGen._GENERIC_DEFINE % (aid.identifier, aid.value)
++        print(OEMAidGen._GENERIC_DEFINE % (aid.identifier, aid.value))
+@@ -1369,1 +1369,1 @@
+-        print "%s::%s:%s::/:%s" % (logon, uid, uid, aid.login_shell)
++        print("%s::%s:%s::/:%s" % (logon, uid, uid, aid.login_shell))
+@@ -1394,1 +1394,1 @@
+-        print "%s::%s:" % (logon, uid)
++        print("%s::%s:" % (logon, uid))
+@@ -1417,1 +1417,1 @@
+-            print '%s %s' % (aid.identifier, aid.normalized_value)
++            print('%s %s' % (aid.identifier, aid.normalized_value))
+@@ -1431,1 +1431,1 @@
+-    for name, gen in gens.iteritems():
++    for name, gen in gens.items():

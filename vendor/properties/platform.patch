@@ -1,0 +1,163 @@
+diff --git a/bionic/libc/system_properties/system_properties.cpp b/bionic/libc/system_properties/system_properties.cpp
+--- a/bionic/libc/system_properties/system_properties.cpp
++++ b/bionic/libc/system_properties/system_properties.cpp
+@@ -58,6 +58,13 @@ static bool is_dir(const char* pathname) {
+   return S_ISDIR(info.st_mode);
+ }
+
++void SystemProperties::Reset() {
++  if (contexts_ != nullptr) {
++    contexts_->FreeAndUnmap();
++    contexts_->~Contexts();
++  }
++  contexts_ = nullptr;
++  initialized_ = false;
++}
++
+ bool SystemProperties::Init(const char* filename) {
+@@ -68,6 +75,7 @@ bool SystemProperties::Init(const char* filename) {
+   if (initialized_) {
++    if (strcmp(filename, property_filename_) != 0) return false;
+     contexts_->ResetAccess();
+     return true;
+   }
+@@ -76,28 +83,12 @@ bool SystemProperties::Init(const char* filename) {
+   strcpy(property_filename_, filename);
+
+-  if (is_dir(property_filename_)) {
+-    if (access("/dev/__properties__/property_info", R_OK) == 0) {
+-      contexts_ = new (contexts_data_) ContextsSerialized();
+-      if (!contexts_->Initialize(false, property_filename_, nullptr)) {
+-        return false;
+-      }
+-    } else {
+-      contexts_ = new (contexts_data_) ContextsSplit();
+-      if (!contexts_->Initialize(false, property_filename_, nullptr)) {
+-        return false;
+-      }
+-    }
+-  } else {
+-    contexts_ = new (contexts_data_) ContextsPreSplit();
+-    if (!contexts_->Initialize(false, property_filename_, nullptr)) {
+-      return false;
+-    }
++  if (!is_dir(property_filename_)) return false;
++  Reset();
++  contexts_ = new (contexts_data_) ContextsSerialized();
++  if (!contexts_->Initialize(false, property_filename_, nullptr)) {
++    Reset();
++    return false;
+   }
+@@ -107,6 +104,10 @@ bool SystemProperties::AreaInit(const char* filename, bool* fsetxattr_failed) {
+   strcpy(property_filename_, filename);
+
++  Reset();
+   contexts_ = new (contexts_data_) ContextsSerialized();
+   if (!contexts_->Initialize(true, property_filename_, fsetxattr_failed)) {
++    Reset();
+     return false;
+   }
+   initialized_ = true;
+@@ -318,12 +309,12 @@ bool SystemProperties::Wait(const prop_info* pi, uint32_t old_serial, uint32_t* new_serial_ptr,
+   if (pi == nullptr) {
+     if (!initialized_) {
+-      return -1;
++      return false;
+     }
+
+     prop_area* serial_pa = contexts_->GetSerialPropArea();
+     if (serial_pa == nullptr) {
+-      return -1;
++      return false;
+     }
+diff --git a/bionic/libc/system_properties/include/system_properties/system_properties.h b/bionic/libc/system_properties/include/system_properties/system_properties.h
+--- a/bionic/libc/system_properties/include/system_properties/system_properties.h
++++ b/bionic/libc/system_properties/include/system_properties/system_properties.h
+@@ -56,6 +56,7 @@ class SystemProperties {
+-  explicit SystemProperties(bool initialized) : initialized_(initialized) {
++  explicit SystemProperties(bool initialized) : contexts_(nullptr), initialized_(initialized) {
+   }
++  void Reset();
+
+diff --git a/bionic/libc/system_properties/contexts_serialized.cpp b/bionic/libc/system_properties/contexts_serialized.cpp
+--- a/bionic/libc/system_properties/contexts_serialized.cpp
++++ b/bionic/libc/system_properties/contexts_serialized.cpp
+@@ -86,7 +86,10 @@ bool ContextsSerialized::InitializeProperties() {
+-  if (!property_info_area_file_.LoadDefaultPath()) {
++  char info_path[PROP_FILENAME_MAX];
++  int length = async_safe_format_buffer(info_path, sizeof(info_path), "%s/property_info", filename_);
++  if (length < 0 || length >= PROP_FILENAME_MAX ||
++      !property_info_area_file_.LoadPath(info_path)) {
+     return false;
+   }
+diff --git a/bionic/libc/system_properties/prop_area.cpp b/bionic/libc/system_properties/prop_area.cpp
+--- a/bionic/libc/system_properties/prop_area.cpp
++++ b/bionic/libc/system_properties/prop_area.cpp
+@@ -37,4 +37,5 @@
+ #include <sys/types.h>
+ #include <sys/xattr.h>
+ #include <unistd.h>
++#include <sys/syscall.h>
+ 
+@@ -65,24 +65,8 @@ prop_area* prop_area::map_prop_area_rw(const char* filename, const char* context,
+-  if (context) {
+-    if (fsetxattr(fd, XATTR_NAME_SELINUX, context, strlen(context) + 1, 0) != 0) {
+-      async_safe_format_log(ANDROID_LOG_ERROR, "libc",
+-                            "fsetxattr failed to set context (%s) for \"%s\"", context, filename);
+-      /*
+-       * fsetxattr() will fail during system properties tests due to selinux policy.
+-       * We do not want to create a custom policy for the tester, so we will continue in
+-       * this function but set a flag that an error has occurred.
+-       * Init, which is the only daemon that should ever call this function will abort
+-       * when this error occurs.
+-       * Otherwise, the tester will ignore it and continue, albeit without any selinux
+-       * property separation.
+-       */
+-      if (fsetxattr_failed) {
+-        *fsetxattr_failed = true;
+-      }
+-    }
+-  }
++  // Instance files retain the application's natural SELinux label.
++  (void) context;
++  if (fsetxattr_failed) *fsetxattr_failed = false;
+
+   if (ftruncate(fd, PA_SIZE) < 0) {
+@@ -111,9 +95,10 @@ prop_area* prop_area::map_fd_ro(const int fd) {
+-  if ((fd_stat.st_uid != 0) || (fd_stat.st_gid != 0) ||
++  if ((fd_stat.st_uid != static_cast<uid_t>(syscall(__NR_geteuid))) ||
++      (fd_stat.st_gid != static_cast<gid_t>(syscall(__NR_getegid))) ||
++      !S_ISREG(fd_stat.st_mode) ||
+       ((fd_stat.st_mode & (S_IWGRP | S_IWOTH)) != 0) ||
+-      (fd_stat.st_size < static_cast<off_t>(sizeof(prop_area)))) {
++      (fd_stat.st_size != static_cast<off_t>(PA_SIZE))) {
+     return nullptr;
+   }
+diff --git a/bionic/libc/system_properties/prop_info.cpp b/bionic/libc/system_properties/prop_info.cpp
+--- a/bionic/libc/system_properties/prop_info.cpp
++++ b/bionic/libc/system_properties/prop_info.cpp
+@@ -50,3 +50,3 @@ prop_info::prop_info(const char* name, uint32_t namelen, uint32_t long_offset) {
+-  auto error_value_len = sizeof(kLongLegacyError) - 1;
++  uint32_t error_value_len = sizeof(kLongLegacyError) - 1;
+   atomic_init(&this->serial, error_value_len << 24 | kLongFlag);
+   memcpy(this->long_property.error_message, kLongLegacyError, sizeof(kLongLegacyError));
+diff --git a/core/property_service/libpropertyinfoparser/property_info_parser.cpp b/core/property_service/libpropertyinfoparser/property_info_parser.cpp
+--- a/core/property_service/libpropertyinfoparser/property_info_parser.cpp
++++ b/core/property_service/libpropertyinfoparser/property_info_parser.cpp
+@@ -23,4 +23,5 @@
+ #include <sys/types.h>
+ #include <unistd.h>
++#include <sys/syscall.h>
+ 
+ namespace android {
+@@ -208,9 +208,10 @@ bool PropertyInfoAreaFile::LoadPath(const char* filename) {
+-  if ((fd_stat.st_uid != 0) || (fd_stat.st_gid != 0) ||
++  if ((fd_stat.st_uid != static_cast<uid_t>(syscall(__NR_geteuid))) ||
++      (fd_stat.st_gid != static_cast<gid_t>(syscall(__NR_getegid))) ||
++      !S_ISREG(fd_stat.st_mode) ||
+       ((fd_stat.st_mode & (S_IWGRP | S_IWOTH)) != 0) ||
+-      (fd_stat.st_size < static_cast<off_t>(sizeof(PropertyInfoArea)))) {
++      (fd_stat.st_size < static_cast<off_t>(sizeof(PropertyInfoAreaHeader)))) {
+     close(fd);
+     return false;
+   }

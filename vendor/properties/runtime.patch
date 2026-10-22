@@ -1,0 +1,32 @@
+diff --git a/bionic/libc/bionic/system_property_api.cpp b/bionic/libc/bionic/system_property_api.cpp
+--- a/bionic/libc/bionic/system_property_api.cpp
++++ b/bionic/libc/bionic/system_property_api.cpp
+@@ -32,6 +32,7 @@
+ #define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
+ #include <sys/_system_properties.h>
++#include <stdlib.h>
+
+@@ -45,6 +46,12 @@
+               "System Properties must be trivially constructable");
++static_assert(__is_trivially_destructible(SystemProperties),
++              "System Properties must not register static destructors");
++
++static const char* private_property_path() {
++  const char* path = getenv("A10VM_PROPERTIES");
++  return path != nullptr && path[0] == '/' ? path : nullptr;
++}
+
+@@ -56,7 +63,8 @@
+ int __system_properties_init() {
+-  return system_properties.Init(PROP_FILENAME) ? 0 : -1;
++  const char* path = private_property_path();
++  return path != nullptr && system_properties.Init(path) ? 0 : -1;
+ }
+@@ -66,8 +74,9 @@
+ int __system_property_area_init() {
+   bool fsetxattr_failed = false;
+-  return system_properties.AreaInit(PROP_FILENAME, &fsetxattr_failed) && !fsetxattr_failed ? 0 : -1;
++  const char* path = private_property_path();
++  return path != nullptr && system_properties.AreaInit(path, &fsetxattr_failed) &&
++         !fsetxattr_failed ? 0 : -1;
+ }

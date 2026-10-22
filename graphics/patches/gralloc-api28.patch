@@ -1,0 +1,12 @@
+diff --git a/gralloc/gralloc.cpp b/gralloc/gralloc.cpp
+--- a/gralloc/gralloc.cpp
++++ b/gralloc/gralloc.cpp
+@@ -1545,7 +1545,9 @@
+         perform: NULL,
+-#if PLATFORM_SDK_VERSION >= 28 // In Q, we want to specify these, but SDK version is not 29 yet. do not merge this to P
++/* gralloc_module_t gained these two members in Q. Building with the API 28
++ * headers (PLATFORM_SDK_VERSION=28) means the struct has no such fields. */
++#if PLATFORM_SDK_VERSION >= 29
+         validateBufferSize: NULL,
+         getTransportSize: NULL,
+ #endif // PLATFORM_VERSION > 28

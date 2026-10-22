@@ -1,0 +1,6 @@
+libc.so
+libdl.so
+libm.so
+liblog.so
+libz.so
+libstdc++.so

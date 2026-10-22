@@ -1,0 +1,7 @@
+LIBC_PLATFORM {
+  global:
+    android_set_application_target_sdk_version;
+    android_get_application_target_sdk_version;
+  local:
+    *;
+};

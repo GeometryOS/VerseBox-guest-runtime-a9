@@ -1,0 +1,2 @@
+<!-- Keep the source fragment path without advertising a GNSS HAL that is not started. -->
+<manifest version="1.0" type="device" />

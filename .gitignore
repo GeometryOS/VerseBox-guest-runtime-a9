@@ -1,0 +1,37 @@
+# Android 9 guest runtime · generated images and build outputs
+#
+# Only source (C/C++/Java/Python/shell, lists, patches, headers) is committed.
+# Everything below is either multi-GB guest material or reproducible output.
+
+# Generated prepared runtime (assets + jniLibs staged for the APK)
+prepared/
+
+# Redroid 9 image: tarball, extracted rootfs, and the path index
+downloads/
+rootfs/
+rootfs-index.json
+
+# Build outputs
+artifacts/
+logs/
+build/
+runtime/build/
+runtime/upstream/
+runtime/downloads/
+runtime/__pycache__/
+graphics/upstream/
+graphics/bin/
+graphics/out/
+bridges/lib/
+bridges/bin/
+bridges/obj/
+bridges/graphics/lib/
+bridges/graphics/obj/
+**/__pycache__/
+
+# Local tool output
+*.log
+*.o
+*.rsp
+*.elf.txt
+*.dex.json
