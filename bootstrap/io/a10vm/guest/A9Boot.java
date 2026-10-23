@@ -35,6 +35,24 @@ public final class A9Boot {
             A9AudioPolicy.register();
             System.out.println("a9_audio_policy=registered");
         } catch (Throwable failure) { System.err.println("a9_audio_policy=unavailable:" + failure); }
+        // API 28's native media services come from the 32-bit mediaserver.
+        // Without endpoints, every app that opens media waits 5 s per missing
+        // name on its UI thread ("Waiting for service media.extractor..." x5,
+        // Skipped 35/41 frames).  Publish no-op endpoints so the lookup fails
+        // fast; real decoding is the later media stage.
+        try {
+            A9MediaPolicy.register();
+        } catch (Throwable failure) { System.err.println("a9_media_policy=unavailable:" + failure); }
+        // Redroid 9 has no usable gatekeeper HIDL HAL (the image only ships
+        // gatekeeper.redroid.so, while HIDL looks for gatekeeper.default.so),
+        // but LockSettingsService dereferences the interface when
+        // user_setup_complete changes and otherwise kills system_server on the
+        // first boot.  Register a guest-side no-op endpoint before SystemServer
+        // starts; see A9GateKeeper for the boundary.
+        try {
+            A9GateKeeper.register();
+            System.out.println("a9_gatekeeper_endpoint=1");
+        } catch (Throwable failure) { System.err.println("a9_gatekeeper_endpoint=unavailable:" + failure); }
         try {
             Class.forName("com.android.server.SystemServer").getMethod("main", String[].class)
                     .invoke(null, (Object) new String[0]);
