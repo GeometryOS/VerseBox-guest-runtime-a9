@@ -1,6 +1,9 @@
 # Android 9 客体移植 · 真实进度与阶段验收
 
-最后更新：2026-10-22 13:0x GMT+8
+最后更新：2026-10-23 12:3x（真机验证：日志转发 ✅、电池显示 42% 🟡、
+卡顿 9.2s→1.6s、dexopt 仍 74 次；完整交接见主工程 26 章）
+
+> **先读主工程 `docs/android9-port/26-真实进度与交接.md`。** 本文只记产物与阶段验收。
 
 > 想看“现在到哪了、卡在哪、下一步做什么”，先读
 > 主工程的 `docs/android9-port/15-当前进度与卡点.md`（主工程）。
@@ -196,6 +199,11 @@ art_runtime_ready=1
 | 整机启动 | `[006.33s] READY Android desktop, input and first frame ready` |
 | 宿主画面（2026-10-22 13:0x） | 桌面干净显示、点图标进应用、guest 返回回桌面；无“桌面尚未打开”叠字 |
 | 显示电源同步 | `framework-display-state.log` → `guest_display_interactive=true` |
+| 首次启动 dexopt | 🟡 **根因已钉死**：`a9exec.log` 67 行全是 `source-linker64`、`dex2oat` 0 行，installer 仍 74 次 `0x001f` → dex2oat 的 exec 不经过 libc 的 `execve`（GuestExec），`skipDex2oat` 位置无效；下一步换层（liblogwrap 或 linker preload）（主工程 26 章 §9.2） |
+| 第一次启动闪退 | **已修，真机确认**：`A9GateKeeper` 注册 no-op gatekeeper 端点，SystemServer 不再 NPE |
+| 打开应用卡顿 | **修在正确的层**：`A9MediaPolicy` 注册 8 个 media 端点，消掉每个名字 5 秒等待（主工程 19 章） |
+| 日志可观测性 | ✅ **已修并验证**：`GuestLogTail` 目录 bug 已改，`adb logcat -s A10VM_GUEST` 能看到实时行（主工程 18 章） |
+| 电量同步 | 🟡 **百分比 + 充电状态数据源已落地**：`HostBatterySysfs` 新增 `usb/` supply（`online=1`、`type=USB`），`BatteryService` 连 `health@2.0/backup` 并 `Waited 0ms`；插拔跟随仍靠 healthd 单次 update（主工程 26 章 §9.1） |
 
 本轮修掉的硬问题：A9 linker 缺 A10 的私有配置契约、`java.library.path` 必须是
 客体路径、`/dev/cpuctl` 白名单、netd/mdns daemon socket 与应答协议、
@@ -216,19 +224,55 @@ AIDL `netd` 端点、audio 三端点桩、`/cache` 等 init 目录、Provision �
 
 **当前剩余（按优先级）**：
 
-1. 音频桥（三个 audio 端点是桩，不发声）；
-2. `media`（mediaserver 是 32 位，profile 里 `media=false`）；
-3. `host-devices` 仍是降级状态；
-4. 阶段 6 与 A10 回归（本轮改了共用的 `GuestDisplayState` /
-   `GuestDisplayPower`，A10 也要重跑）。
+1. **dexopt 探针（最先做，一次构建）**：`GuestExec.cpp` 的
+   `a9_guestexec_enter` 无条件打印已写入但**未构建**；构建后看
+   `framework-installer.log` 是否出现该行，确认 installd 的 exec 是否
+   经过 libc 的 `execve`（主工程 26 章 §3）；
+2. **host-devices（电池跟随的正路）**：让 health@2.0 的 `backup` 实例
+   跑起来（A10 的 `liba10vm-host-devices.so` patch `default`→`backup`，
+   或补 HIDL 头重编 A9 版），验收 `HealthServiceWrapper` 连 backup、
+   插拔 10 秒内跟随（主工程 26 章 §2.4）；
+3. **卡顿**：等 dexopt 清零后再看 `Slow delivery`，不要先动 imageless；
+4. **阶段 11 Wi-Fi**：`GuestWifi` 未启动，镜像无 `wpa_supplicant`
+   （主工程 21 章）；
+5. **阶段 12 音频**：A9 的 `audioserver` 是 ELF32、profile `audio=false`；
+   需要 64 位 audioserver，独立阶段（主工程 22 章）；
+6. **阶段 13 相机/传感器**：`cameraserver` 32 位，host-devices 降级
+   （主工程 23 章）；
+7. **阶段 6 与 A10 回归**：共用层改了 `GuestLogTail` /
+   `HostBatterySysfs`，A10 也要重跑。
 
-详见 主工程的 `docs/android9-port/15-当前进度与卡点.md`。
+详见 主工程的 `docs/android9-port/15-当前进度与卡点.md` 与
+`docs/android9-port/17-阶段7-dexopt与电池同步.md`。
 
-### 阶段 6 · 双运行时回归（未开始）
+### 阶段 7 · 首次启动与电量（真机部分完成、部分待验证）
 
-- A9 单独启动；
-- A10 单独启动；
-- 两者同时启动，确认目录、属性区、socket、GPU、输入互不干扰。
+- **第一次启动闪退：已修，真机确认。**
+  真机 `framework-server.log` 的崩溃栈是
+  `LockSettingsService$DeviceProvisionedObserver.reportDeviceSetupComplete()`
+  调用 null 的 `IGateKeeperService`。`bootstrap/.../A9GateKeeper.java` 在
+  `A9Boot` 里、SystemServer 前注册同名 no-op binder 端点后，新建 A9
+  第一次启动可直接进入桌面，不再闪退。
+- **dexopt：真正原因是 shim 漏拦 `execvp`（已改，待构建）。**
+  installd 的 dynsym 只有 `android_fork_execvp_ext` / `execl` / `execv`，
+  没有 `execvp`；liblogwrap 的 `android_fork_execvp_ext()` 在 fork 后走
+  `execvp`。之前 `dexopt-shim.c` 只拦 `execv`/`execve`，所以
+  `A10VM_SKIP_DEX2OAT` 从未命中，74 次 `failed with 0x001f` 每次冷启动重放。
+  已补 `execvp` / `execvpe`（主工程 25 章）。
+- **电量：先补 `type=Battery`，跟随宿主仍待 host-devices。**
+  `HostBatterySysfs` 之前写了 capacity/status/present/uevent，但漏了
+  `type`；AOSP 9 `BatteryMonitor::init()` 靠 `type` 判定电池，缺了会跳过
+  整个 supply。已补 `type=Battery`。healthd 仍只在 uevent 时 update，
+  要跟随宿主必须编 A9 版 `host-devices`（health@2.0 `backup`），
+  它卡在 HIDL 头（主工程 25 章）。
+
+### 阶段 6 · 双运行时回归（进行中）
+
+- 多实例管理已接入宿主：每台虚拟机独立 `files/devices/<时间戳>/`、
+  独立 `VmService` 队列与原生窗口；旧的两台数据按原目录登记为既有虚拟机；
+- 已完成：单台 A9/A10 启动、停止、再启动；
+- 待补：A9 + A10 同时启动、同一 ROM 两台同时启动的实机记录
+  （见主工程 `docs/MULTI_VM.md` 与 `docs/android9-port/11-阶段6-打包与回归.md`）。
 
 ---
 

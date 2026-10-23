@@ -16,7 +16,12 @@
 这是一个可以在不用 root，不用 Docker，不用容器的情况下，让 **Android 9（API 28）** 运行在 VerseBox 虚拟机的安卓9独立客体😋（VerseBox 后续也将开源？）
 
 > **目前的状态：可以启动并操作。**
-> 音频桥、media 与 `host-devices` 尚未接入；导致启动后需要卡顿一段时间才能操作的 dexopt 仍在修复。
+> 音频桥、media 与 `host-devices` 尚未接入。
+> 2026-10-23 真机结论：新建 A9 的第一次启动闪退已修（`A9GateKeeper`）；
+> dexopt 仍会 74 次 `0x001f`、进系统后卡一段时间（未修好，下一步改
+> `GuestExec.cpp` 并重编 libc）；电量配置已改对（`extraPreloads` 移到
+> manifest 顶层），待重启实例验证。详见
+> `docs/android9-port/17-阶段7-dexopt与电池同步.md`。
 
 ## 这是干什么的
 
@@ -69,14 +74,21 @@ sh scripts/build.sh
 ```text
 scripts/     prepare-a9.py、镜像抓取/解包、闭包审计
 bootstrap/   A9Boot、A9DesktopCheck、A9AudioPolicy 等 Java 启动层
-bridges/     属性/Binder/设备/日志/netd 监听/图形 HAL 源码与构建脚本
+bridges/     属性/Binder/设备/日志/netd 监听/图形 HAL 源码与构建脚本；
+             dex2oat-stub.S（64 位 /system/bin/dex2oat 桩，dexopt 修复）、
+             healthd-sysfs.c（API 28 healthd 的电池 sysfs 重定向）
 graphics/    goldfish 图形源码、emugen 定义、AOSP 9 头文件
 runtime/     API 28 linker/libc/libdl/libm 的源列表、补丁、构建脚本
 native/      A9 专用 native 源码
-vendor/      共享容器源码副本，保证本仓库可独立 clone 构建
+vendor/      共享容器源码副本，保证本仓库可独立 clone 构建；
+             vendor/framework/ 是 A10 guest-runtime/check/ 的 API 28 分支
 prepared/    产物：assets + jniLibs（不入库）
 rootfs/      解包后的 Redroid 9 根文件系统（不入库）
 ```
+
+> Java 层不在 `src/` 下（那里只有 `AndroidManifest.xml`）：启动类在
+> `bootstrap/io/a10vm/guest/`，框架与检查类在 `vendor/framework/`，
+> 两者由 `scripts/prepare-a9.py` 编进 `framework-check.dex`。
 
 ## 注意事项
 
