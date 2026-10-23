@@ -127,7 +127,13 @@ bool registerHostHealth() {
     Battery battery;
     if (!readBattery(&battery)) return false;
     android::sp<HostHealth> service = new HostHealth;
-    if (service->registerAsService() != android::OK) return false;
+    // API 28's BatteryService resolves the health instance named "backup"
+    // (see framework-health.log: "HealthServiceWrapper listening to instance
+    // backup").  API 29 looks for "default", which is why A10 calls
+    // registerAsService() without a name.  Registering the wrong instance
+    // here is silent: the service starts, BatteryService keeps waiting on
+    // the ROM healthd, and the battery never follows the host.
+    if (service->registerAsService("backup") != android::OK) return false;
     std::thread([service] {
         while (true) { sleep(10); service->update().isOk(); }
     }).detach();

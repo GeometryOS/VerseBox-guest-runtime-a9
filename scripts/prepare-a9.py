@@ -82,10 +82,18 @@ BRIDGE_FILES = [
      "liba9vm-manager-policy.so", "liba9vm-manager-policy.so", None),
     # Redroid 9 ships only a 32-bit dex2oat, so every installd DexInv fails and
     # PackageManagerService retries it for all system packages on every boot
-    # (measured: ~74 failures per cold boot, tens of seconds of stall).
-    # Preloaded into installd only; drives A10VM_SKIP_DEX2OAT.
+    # (measured: ~74 failures per cold boot, tens of seconds of stall).  The
+    # prepared image therefore carries a 64-bit static-PIE /system/bin/dex2oat
+    # stub (see dex2oat-stub.S).  This shim stays as the second line of defence
+    # for any installd path that calls execv/execve on the original name.
     ("liba9vm-dexopt-shim.so", A9_BRIDGES / "lib" / "liba9vm-dexopt-shim.so",
      "liba9vm-dexopt-shim.so", "liba9vm-dexopt-shim.so", None),
+    # API 28 healthd reads /sys/class/power_supply, which the guest path layer
+    # leaves on the host sysfs.  The wrapper redirects only that prefix to the
+    # per-instance battery-sysfs directory the host keeps current (Android 10
+    # uses its health HAL instead).
+    ("liba9vm-healthd-sysfs.so", A9_BRIDGES / "lib" / "liba9vm-healthd-sysfs.so",
+     "liba9vm-healthd-sysfs.so", "liba9vm-healthd-sysfs.so", None),
     ("libOpenglSystemCommon.so", A9_BRIDGES / "graphics" / "lib" / "libOpenglSystemCommon.so",
      "liba9vm-guest-libOpenglSystemCommon.so", "libOpenglSystemCommon.so", None),
     ("libEGL_emulation.so", A9_BRIDGES / "graphics" / "lib" / "libEGL_emulation.so",
@@ -359,6 +367,10 @@ def main():
         normal = ASSET_PREFIX + "rootfs/" + path
         key = normal.lower()
         lower_counts[key] = lower_counts.get(key, 0) + 1
+    dex2oat_stub = A9_BRIDGES / "bin" / "dex2oat-stub"
+    if not dex2oat_stub.is_file():
+        print("prepare-a9: dex2oat-stub missing; packaging the ROM's 32-bit dex2oat",
+              file=sys.stderr)
     for path in candidates:
         record = index[path]
         normal = ASSET_PREFIX + "rootfs/" + path
@@ -368,9 +380,21 @@ def main():
             asset = ASSET_PREFIX + "rom-encoded/" + hashlib.sha256(path.encode()).hexdigest() + ".asset"
         else:
             asset = normal
-        destination = stage_copy(TREE / path, "assets", asset)
+        # The image's /system/bin/dex2oat is ELF32/EM_ARM.  The API 28 runtime is
+        # 64-bit, so every installd DexInv fails with 0x001f and PackageManager
+        # retries all system packages on every boot.  Package a 64-bit static
+        # PIE stub instead: whichever exec path installd uses, the child loads
+        # and exits 0, so the DexInv succeeds without a doomed 32-bit exec.
+        # No oat is produced; the guest keeps running interpreter + JIT, which
+        # is what it already does.
+        source = TREE / path
+        source_kind = "redroid9"
+        if path == "system/bin/dex2oat" and dex2oat_stub.is_file():
+            source = dex2oat_stub
+            source_kind = "project-a9"
+        destination = stage_copy(source, "assets", asset)
         entry = {"name": asset, "bytes": destination.stat().st_size, "sha256": digest(destination),
-                 "mode": stat.S_IMODE(record["mode"])}
+                 "source": source_kind, "mode": stat.S_IMODE(record["mode"])}
         if encoded:
             entry["installPath"] = "rootfs/" + path
         if asset in data:
@@ -541,6 +565,8 @@ def main():
         "appClass": "io.a10vm.guest.A9GuestApplication",
         "keymasterLogical": "keymaster",
         "keystoreLogical": "keystore",
+        # Unused: FrameworkSession reads the top-level extraPreloads.  Kept
+        # empty so nobody re-adds the shim here by mistake.
         "extraPreloads": [],
         "bootEntry": "io.a10vm.guest.A9Boot",
         "checkClass": "io.a10vm.guest.A9DesktopCheck",
@@ -594,8 +620,15 @@ def main():
         "desktopPackages": packages,
         "allSystemPackages": True,
         "systemApkCount": len(packages),
+        # True when /system/bin/dex2oat in this prepared tree is the project's
+        # 64-bit static PIE stub instead of the image's ELF32/EM_ARM binary.
+        "dex2oatStub": dex2oat_stub.is_file(),
         "propertyFiles": property_files,
         "propertyCount": len(properties),
+        # FrameworkSession preloads these into every guest process through the
+        # top-level manifest field.  It must stay at the top level: the old
+        # runtimeProfile copy was never read, so healthd never saw the shim.
+        "extraPreloads": ["liba9vm-healthd-sysfs.so"],
         "runtimeProfile": profile,
         "symlinks": symlinks,
         "links": links,
@@ -660,6 +693,14 @@ def build_dex():
         A9 / "bootstrap" / "io" / "a10vm" / "guest" / "A9DesktopHome.java",
         A9 / "bootstrap" / "io" / "a10vm" / "guest" / "A9GuestApplication.java",
         A9 / "bootstrap" / "io" / "a10vm" / "guest" / "A9AudioPolicy.java",
+        # API 28 media services are published by the 32-bit mediaserver, which
+        # cannot run here.  No-op endpoints keep ServiceManager lookups from
+        # blocking the app UI thread for 5 s each.
+        A9 / "bootstrap" / "io" / "a10vm" / "guest" / "A9MediaPolicy.java",
+        # Registers the no-op gatekeeper endpoint LockSettingsService needs on
+        # the first provision (user_setup_complete); without it system_server
+        # dies with a NullPointerException before the first desktop appears.
+        A9 / "bootstrap" / "io" / "a10vm" / "guest" / "A9GateKeeper.java",
     ]
     for name in ("ProcessEvidence", "DesktopInput", "DesktopProcesses", "GuestMemory", "GuestScheduling",
                  # GuestDisplayPower (shared with Android 10) launches
@@ -694,12 +735,25 @@ def build_dex():
             "bytes": destination.stat().st_size, "sha256": digest(destination)}), encoding="utf-8")
 
 
+def run_tool(command, label):
+    """Run a build tool with output redirected to a file.
+
+    Redirecting to a file instead of using capture_output also keeps the script
+    usable under restricted environments where creating a pipe for a child
+    process is denied (Windows sandboxes reject CreatePipe with EPERM)."""
+    log = A9 / "artifacts" / (label + ".log")
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with open(log, "w", encoding="utf-8", errors="replace") as stream:
+        code = subprocess.run(command, stdout=stream, stderr=subprocess.STDOUT).returncode
+    if code:
+        raise SystemExit(label + " failed (exit " + str(code) + "):\n" +
+                         log.read_text(encoding="utf-8", errors="replace"))
+
+
 def compile_java(sources, destination):
     destination.mkdir(parents=True, exist_ok=True)
     command = ["javac", "--release", "8", "-cp", str(ANDROID_JAR), "-d", str(destination)] + [str(x) for x in sources]
-    result = subprocess.run(command, capture_output=True, text=True)
-    if result.returncode:
-        raise SystemExit("javac failed:\n" + result.stdout + result.stderr)
+    run_tool(command, "javac")
 
 
 def d8(classes, destination):
@@ -709,9 +763,7 @@ def d8(classes, destination):
     class_files = [str(x) for x in classes.rglob("*.class")]
     command = ["cmd", "/c", str(D8), "--min-api", "28", "--lib", str(ANDROID_JAR),
                "--output", str(destination)] + class_files
-    result = subprocess.run(command, capture_output=True, text=True)
-    if result.returncode:
-        raise SystemExit("d8 failed:\n" + result.stdout + result.stderr)
+    run_tool(command, "d8")
 
 
 if __name__ == "__main__":

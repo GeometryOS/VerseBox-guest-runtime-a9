@@ -90,6 +90,25 @@ const char* guestPath(int dirfd, const char* path, char (&buffer)[PATH_MAX], boo
         return nullptr;
     }
     if (beneath(path, root) || hostPath(path)) return path;
+    // Android 9's healthd reads /sys/class/power_supply directly.  The guest
+    // path layer deliberately leaves /sys on the host sysfs, and an untrusted
+    // app cannot read the host's power_supply nodes, so healthd reports no
+    // battery.  HostBatterySysfs materialises the host snapshot under the
+    // instance state root; map only this subtree there.  Doing it in libc
+    // (instead of an LD_PRELOAD shim) matters: the guest linker does not let a
+    // preloaded open() override libc's versioned one, which is why the
+    // a9vm_healthd_sysfs shim loaded but was never called.
+    const char* stateRoot = getenv("A10VM_STATE_ROOT");
+    if (stateRoot != nullptr && stateRoot[0] != '\0' &&
+            beneath(path, "/sys/class/power_supply")) {
+        constexpr const char* supply = "/sys/class/power_supply";
+        if (!copy(buffer, stateRoot) ||
+                !append(buffer, "/battery-sysfs/class/power_supply") ||
+                !append(buffer, path + strlen(supply))) {
+            return nullptr;
+        }
+        return buffer;
+    }
     char pending[PATH_MAX];
     if (path[0] == '/') {
         if (!guestAbsolute(path)) return path;

@@ -16,8 +16,52 @@ static bool environmentHas(char* const env[], const char* key) {
     return false;
 }
 
+static bool skipDex2oat(const char* path) {
+    if (!getenv("A10VM_SKIP_DEX2OAT")) return false;
+    const char* base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    // API 28's installd always forks before exec, so exiting 0 here makes its
+    // waitpid see a successful dex2oat child.  The ROM only ships an ELF32
+    // dex2oat (AArch64 runtime cannot execute it), and the 64-bit stub in
+    // /system/bin still has to go through the guest linker, which is why the
+    // prepared-image replacement alone never cleared the 74 DexInv failures.
+    return !strcmp(base, "dex2oat") || !strcmp(base, "dex2oatd");
+}
+
+static void traceExec(const char* path, bool skipped) {
+    // stderr is useless for this probe: installd's dex2oat child redirects fd
+    // 1/2 to liblogwrap's log pipe, so a write(2) marker never reaches
+    // framework-installer.log.  Appending to $A10VM_STATE_ROOT/a9exec.log
+    // survives that redirect and answers the only question that matters:
+    // does installd's exec reach libc's execve wrapper at all?
+    const char* state = getenv("A10VM_STATE_ROOT");
+    if (!state) return;
+    char log[PATH_MAX];
+    size_t used = strlen(state);
+    if (used + 12 >= sizeof(log)) return;
+    memcpy(log, state, used);
+    memcpy(log + used, "/a9exec.log", 12);
+    int fd = static_cast<int>(syscall(__NR_openat, AT_FDCWD, log,
+            O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600));
+    if (fd < 0) return;
+    char line[PATH_MAX + 16];
+    size_t length = 0;
+    if (skipped) { memcpy(line, "skip ", 5); length = 5; }
+    else { memcpy(line, "enter ", 6); length = 6; }
+    size_t pathLength = strlen(path);
+    if (pathLength > PATH_MAX) pathLength = PATH_MAX;
+    memcpy(line + length, path, pathLength);
+    length += pathLength;
+    line[length++] = '\n';
+    syscall(__NR_write, fd, line, length);
+    syscall(__NR_close, fd);
+}
+
 static int guestExec(const char* path, char* const argv[], char* const env[], unsigned depth) {
     if (depth > 4) { errno = ELOOP; return -1; }
+    bool skipped = skipDex2oat(path);
+    traceExec(path, skipped);
+    if (skipped) _exit(0);
     char buffer[PATH_MAX];
     const char* mapped = guestPath(AT_FDCWD, path, buffer);
     if (!mapped) return -1;
