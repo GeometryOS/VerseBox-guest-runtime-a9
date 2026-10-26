@@ -1,7 +1,21 @@
 # Android 9 客体移植 · 真实进度与阶段验收
 
-最后更新：2026-10-23 12:3x（真机验证：日志转发 ✅、电池显示 42% 🟡、
-卡顿 9.2s→1.6s、dexopt 仍 74 次；完整交接见主工程 26 章）
+最后更新：2026-10-24（本轮重启已取日志与 102 线程栈；阶段 9 仍未闭环）
+
+## 当前状态（2026-10-24，优先看这里）
+
+> **最新推进：** WebView 子 zygote 的漏编与 API 28 参数错误已在最终 APK 修复，并曾在设备确认就绪。本次重启实例 `1792783274970` 到桌面首帧 7.53 秒；system_server 仅记录一条 707ms 慢消息。dexopt shim 虽加载且开关为 1，仍失败 74 次 `0x001f`，skip 命中为 0；102 线程转储中的 main 线程采样时空闲。阶段 9 仍未修复，详见主工程 26 章 §14。
+
+- **现在的进度：A9 WebView 子 zygote 已在修复版上就绪；阶段 9 整体卡顿仍未闭环。**
+- **已验证到的功能：** 桌面启动、日志文件实时转发；状态栏电量百分比曾显示 42%。这些是旧的真机记录，不代表本轮重新验收。
+- **性能：** 早先启动日志有 **9885ms Davey** / 1183 个 skipped frames；本次再次重启到首帧 7.53 秒，system_server 只有一条 **707ms Slow delivery**。新 SIGQUIT 快照采样时 main 已空闲，没有卡顿现场阻塞栈。A9 进程仍反复记录 `Patching disabled`、回退 imageless；本地 `runtime/upstream` 没有 ART 源码，目前还没有 API 28 ARM64 patchoat/dex2oat 产物。
+- **首次启动：** 用户报告首次安装后第一次启动失败、重进 App 后才成功。当前保留的实例只对应后续成功会话，尚无首次失败日志；这项问题仍未定位。
+- **电池：** 最新客体温度 `358` 与宿主温度 `358` 同为 0.1°C 单位，电量 32%、USB 供电也一致。客体 `current_now=-18`，宿主 OPLUS 状态打印 `Battery current=-360`；读取时点/接口语义不同，不能据此判断精准或错误。启动记录显示 `host-devices unavailable: Missing runtime input: host-devices`，项目 health HAL 当前未运行；实时刷新和电流精度仍待验收。
+- **声音/驱动：** A9 profile 仍关闭真实 audio/media；没有可运行的 A9 64 位 audioserver。当前源码材料不含 `frameworks/av`，所以音频不能标为已接入。Wi-Fi、相机和传感器也尚未完成端到端验收。所有 guest native/HAL 产物必须是 ARM64。
+- **日志：** `A10VM_GUEST` 实时转发已有旧真机验证。当前实例的 `framework-server.log` 已保存完整 102 线程转储；本次采样 main 线程已回到 `MessageQueue.nativePollOnce`，不是卡顿现场栈。
+- **接下来按序推进：** ①查清 AOSP 9 `android_fork_execvp_ext` 的 ABI 与 shim 符号绑定，单次验证 74 次 dexopt 是否清零；②在 Settings/文件/WebView 实际卡顿时立即取线程栈；③之后再推进 ARM64 ART/patchoat，不移除 `-Xnoimage-dex2oat`；④补齐 `host-devices` 并验收电流/温度；⑤取得首次失败会话日志。详见主工程 26 章 §14。
+
+完整根因台账和历史证据见主工程 `docs/android9-port/26-真实进度与交接.md`；旧的历史阶段记录不要覆盖本节当前状态。
 
 > **先读主工程 `docs/android9-port/26-真实进度与交接.md`。** 本文只记产物与阶段验收。
 

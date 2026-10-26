@@ -30,10 +30,16 @@
 
 typedef int (*ExecFn)(const char*, char* const[]);
 typedef int (*ExecVeFn)(const char*, char* const[], char* const[]);
-/* AOSP 9 liblogwrap/fork_exec.h (Android 10 adds a trailing bool logwrap). */
-typedef void (*LogFunction)(const char* format, ...);
+/* AOSP 9 liblogwrap/fork_exec.h:
+ *   int android_fork_execvp_ext(int argc, char* argv[], int* status,
+ *                               bool ignore_int_quit, int log_target,
+ *                               bool abbreviated);
+ * Android 10 adds a trailing const char* logwrap_name.  The previous
+ * declaration here used (int logwrap_fd, LogFunction log_function), which is
+ * the wrong sixth argument type and made the forwarded call unsafe.
+ */
 typedef int (*ForkExecFn)(int argc, char* argv[], int* status, bool ignore_int_quit,
-                          int logwrap_fd, LogFunction log_function);
+                          int log_target, bool abbreviated);
 
 static int skipDex2Oat(const char* path) {
     const char* enabled = getenv("A10VM_SKIP_DEX2OAT");
@@ -111,14 +117,21 @@ int execvpe(const char* file, char* const argv[], char* const envp[]) {
  * dex2oat child; no fork happens, so there is nothing to wait for.
  */
 int android_fork_execvp_ext(int argc, char* argv[], int* status, bool ignore_int_quit,
-                            int logwrap_fd, LogFunction log_function) {
-    if (argc > 0 && skipDex2Oat(argv[0])) {
+                            int log_target, bool abbreviated) {
+    /* Unconditional marker: proves whether installd's UND symbol really binds
+     * to this preload object on the guest linker.  stderr from the installd
+     * parent reaches framework-installer.log (the constructor lines do). */
+    say("a9vm_dexopt_shim=fork_execvp_entry\n");
+    if (argc > 0 && argv != NULL && skipDex2Oat(argv[0])) {
         say("a9vm_dexopt_shim=skip_fork_execvp\n");
         if (status != NULL) *status = 0;
         return 0;
     }
     static ForkExecFn real;
     if (real == NULL) real = (ForkExecFn)dlsym(RTLD_NEXT, "android_fork_execvp_ext");
-    if (real == NULL) return -1;
-    return real(argc, argv, status, ignore_int_quit, logwrap_fd, log_function);
+    if (real == NULL) {
+        say("a9vm_dexopt_shim=dlsym_next_null\n");
+        return -1;
+    }
+    return real(argc, argv, status, ignore_int_quit, log_target, abbreviated);
 }

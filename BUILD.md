@@ -90,7 +90,9 @@ build-libm.sh          生成 lib/libm.so
 重建桥接与图形还需要 NDK；路径由 `ANDROID_HOME`、`ANDROID_NDK_HOME` 覆盖。
 
 `prepare-a9.py` 的清单会顺带生成 `framework-check.dex`，因此改过
-`bootstrap/*.java` 或 `bridges/` 产物后都要重跑这一步。
+`bootstrap/*.java` 或 `vendor/framework/*.java` 后都要重建 DEX。应用进程的
+`CLASSPATH` 指向该文件，`AppLaunch`、`GuestApplication`、`GuestChildZygote`
+等运行入口必须都编入；遗漏时相应客体进程会在启动时 `ClassNotFoundException`。
 
 ### 3.1 静态 Bionic（`build-static.sh`）
 

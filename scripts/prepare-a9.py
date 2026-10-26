@@ -315,6 +315,20 @@ def main():
     for path, record in arm64:
         if path in used_guest_paths:
             continue
+        # The ROM liblogwrap creates a pty before fork(); inside the container
+        # that fails and every installd DexInv returns 0x001f without ever
+        # exec'ing dex2oat.  Replace it with the project build, which skips
+        # dex2oat and uses a plain fork/execvp for other helpers.
+        if path == "system/lib64/liblogwrap.so":
+            logwrap = A9_BRIDGES / "lib" / "liba9vm-logwrap.so"
+            if logwrap.is_file():
+                add_native(logwrap, "liblogwrap.so", "liba9vm-logwrap.so", "project-a9",
+                           "liblogwrap.so")
+                native_links.append({"path": "rootfs/" + path, "logical": "liblogwrap.so"})
+                used_guest_paths.add(path)
+                continue
+            print("prepare-a9: liba9vm-logwrap.so missing; keeping ROM liblogwrap",
+                  file=sys.stderr)
         base = posixpath.basename(path)
         logical = None
         guest_name = "liba9vm-image-" + hashlib.sha256(path.encode()).hexdigest()[:20] + ".so"
@@ -703,6 +717,10 @@ def build_dex():
         A9 / "bootstrap" / "io" / "a10vm" / "guest" / "A9GateKeeper.java",
     ]
     for name in ("ProcessEvidence", "DesktopInput", "DesktopProcesses", "GuestMemory", "GuestScheduling",
+                 # AppLaunch dispatches WebViewZygoteInit through this project
+                 # entrypoint. Keep it in framework-check.dex, which is the
+                 # CLASSPATH used by every guest app_process child.
+                 "GuestChildZygote",
                  # GuestDisplayPower (shared with Android 10) launches
                  # io.a10vm.guest.GuestDisplayState; without it every
                  # updateDisplayPower() tick throws ClassNotFoundException.
