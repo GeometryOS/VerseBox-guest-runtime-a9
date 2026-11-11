@@ -252,7 +252,7 @@ def patch_linker_main():
         if stripped in ("#ifdef __ANDROID__", "#ifdef A10VM_DEBUGGERD"):
             window = "".join(lines[index + 1:index + 13])
             if "debuggerd" in window:
-                out.append("#if 0  # debuggerd disabled (A9 private linker)\n")
+                out.append("#if 0  /* debuggerd disabled (A9 private linker) */\n")
                 disabled += 1
                 continue
         out.append(line)
