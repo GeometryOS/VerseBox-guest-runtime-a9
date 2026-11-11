@@ -64,6 +64,15 @@ jobs:
             "platforms;android-28" "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.14206865"
           test -x "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
 
+      # runtime/build-static.sh 直接调用裸 `llvm-ar`（不写绝对路径），NDK 的 llvm binutils
+      # 默认不在 PATH 里 —— 缺了就是 `llvm-ar: not found`（exit 127）。这里一次性补齐。
+      - name: Put NDK LLVM binutils on PATH
+        run: |
+          set -e
+          NDK_BIN="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "${NDK_BIN}/llvm-ar"
+          echo "${NDK_BIN}" >> "${GITHUB_PATH}"
+
       - name: Install patchelf
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends patchelf
 
