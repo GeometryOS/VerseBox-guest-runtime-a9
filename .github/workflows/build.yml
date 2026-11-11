@@ -1,0 +1,206 @@
+# Full build of the Android 9 runtime payload (prepared/) **and the new-format ROM package** for CI and releases.
+#
+# This repository only handles the A9 guest runtime: image -> rootfs -> API 28 runtime ->
+# bridges -> prepared (assets + jniLibs + manifest) -> dist/versebox-android9-<ver>.zip
+# (+ -min.zip + apk-resident-libs-android9.tar). The APK belongs to the host project,
+# not built here: this repo has no app source, so scripts/build.sh stops after the ROM package.
+#
+# Artifacts: a9-runtime-<ref>.tar.gz (prepared) + versebox-*.zip + *-min.zip
+#            + apk-resident-libs-*.tar + pack-*.json + SHA256SUMS.
+#
+# Triggers:
+#   * push any branch / PR -> Full build (incremental after cache)
+#   * push tag v*          -> Build and create GitHub Release
+#   * workflow_dispatch    -> Manual build
+name: Build A9 runtime
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: a9-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/29.0.14206865
+      A9_SKIP_APK: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install platform / build-tools / NDK 29
+        run: |
+          set -e
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "${SDKMANAGER}" ]; then SDKMANAGER=$(command -v sdkmanager || true); fi
+          if [ -z "${SDKMANAGER}" ] || [ ! -x "${SDKMANAGER}" ]; then
+            echo "no sdkmanager in $ANDROID_HOME/cmdline-tools/latest or PATH" >&2
+            ls "$ANDROID_HOME" >&2 || true
+            exit 1
+          fi
+          echo "${ANDROID_HOME}/cmdline-tools/latest/bin" >> "${GITHUB_PATH}"
+          echo "${ANDROID_HOME}/platform-tools" >> "${GITHUB_PATH}"
+          yes | "${SDKMANAGER}" --sdk_root="${ANDROID_HOME}" --licenses >/dev/null || true
+          "${SDKMANAGER}" --sdk_root="${ANDROID_HOME}" --install \
+            "platforms;android-28" "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.14206865"
+          test -x "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+
+      - name: Install patchelf
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends patchelf
+
+      # Three cache layers, keyed only by what affects that layer.
+      - name: Cache image tarball
+        uses: actions/cache@v4
+        with:
+          path: downloads
+          key: a9-image-${{ runner.os }}-${{ hashFiles('scripts/fetch-redroid9.py') }}
+
+      - name: Cache extracted rootfs
+        uses: actions/cache@v4
+        with:
+          path: rootfs
+          key: a9-rootfs-${{ runner.os }}-${{ hashFiles('scripts/extract-rootfs.py') }}
+
+      - name: Cache AOSP sources and native outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            runtime/upstream
+            runtime/build
+            bridges/lib
+            bridges/bin
+            bridges/obj
+            bridges/graphics
+          key: a9-native-${{ runner.os }}-${{ hashFiles('runtime/*.sh', 'runtime/*.py', 'runtime/fetch-a9-sources.sh', 'bridges/**', 'vendor/**') }}
+
+      # Order: image -> rootfs -> runtime -> bridges -> prepared -> ROM package -> (APK only if app exists).
+      - name: Build (image -> rootfs -> runtime -> bridges -> prepared -> ROM)
+        run: sh scripts/build.sh
+
+      - name: Verify prepared manifest
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          manifest = pathlib.Path("prepared/assets/guest-runtime-a9-inputs.json")
+          assert manifest.is_file(), "missing " + str(manifest)
+          m = json.loads(manifest.read_text(encoding="utf-8"))
+          assert m["guestSdk"] == 28 and m["frameworkSdk"] == 28, "wrong SDK in manifest"
+          files = m["files"]
+          assert len(files) > 100, "too few native files: %d" % len(files)
+          for entry in files:
+              is_resident = entry.get("resident") is True
+              lib_path = entry.get("libPath")
+              if is_resident or not lib_path:
+                  path = pathlib.Path("prepared/jniLibs/arm64-v8a") / entry["name"]
+              else:
+                  path = pathlib.Path("prepared") / "assets" / lib_path
+              assert path.is_file(), "missing " + str(path)
+              assert path.stat().st_size == entry["bytes"], "size mismatch: " + str(path)
+          print("prepared ok: %d native, %d data" % (len(files), len(m["data"])))
+          PY
+
+      # ROM package self-check: never treat "the packer printed success" as proof.
+      - name: Verify ROM package
+        run: |
+          set -e
+          ls -l dist/
+          shopt -s nullglob
+          full=()
+          minimal=()
+          for zip in dist/versebox-*.zip; do
+            case "$zip" in
+              *-min.zip) minimal+=("$zip") ;;
+              *) full+=("$zip") ;;
+            esac
+          done
+          if [ ${#full[@]} -eq 0 ]; then
+            echo "no ROM package produced under dist/ (pack-rom step did not run?)" >&2
+            exit 1
+          fi
+          for zip in "${full[@]}"; do
+            python3 rom/pack-rom.py --verify-only "$zip"
+          done
+          if [ ${#minimal[@]} -eq 0 ]; then
+            echo "missing minimal placeholder zip (-min.zip): apk_artifacts step did not run?" >&2
+            exit 1
+          fi
+          for zip in "${minimal[@]}"; do
+            python3 - "$zip" <<'PY'
+          import sys, zipfile
+          path = sys.argv[1]
+          with zipfile.ZipFile(path) as archive:
+              names = archive.namelist()
+              assert names == ["versebox_properties.yaml"], names
+              text = archive.read("versebox_properties.yaml").decode("utf-8")
+          assert "placeholder: true" in text, "minimal zip lacks placeholder: true"
+          assert "payloadBytes: 0" in text, "minimal zip must declare payloadBytes: 0"
+          print("minimal ok:", path)
+          PY
+          done
+          tars=(dist/apk-resident-libs-*.tar)
+          if [ ${#tars[@]} -eq 0 ]; then
+            echo "missing apk-resident-libs-*.tar (APK 的 lib/ 没有来源，装出来的包开不了机)" >&2
+            exit 1
+          fi
+          for tar in "${tars[@]}"; do tar -tf "$tar"; done
+
+      - name: Gradle AAR (only when the Gradle shell exists)
+        if: hashFiles('settings.gradle.kts') != '' && hashFiles('gradlew') != ''
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Package
+        run: |
+          set -e
+          name="a9-runtime-${GITHUB_REF_NAME:-dev}"
+          tar -czf "${name}.tar.gz" prepared
+          sha256sum "${name}.tar.gz" > SHA256SUMS
+          shopt -s nullglob
+          for f in dist/versebox-*.zip dist/*-min.zip dist/apk-resident-libs-*.tar dist/pack-*.json; do
+            [ -f "$f" ] || continue
+            sha256sum "$f" >> SHA256SUMS
+          done
+          cat SHA256SUMS
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: a9-runtime
+          path: |
+            a9-runtime-*.tar.gz
+            dist/versebox-*.zip
+            dist/*-min.zip
+            dist/apk-resident-libs-*.tar
+            dist/pack-*.json
+            SHA256SUMS
+          if-no-files-found: error
+
+      - name: Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            a9-runtime-*.tar.gz
+            dist/versebox-*.zip
+            dist/*-min.zip
+            dist/apk-resident-libs-*.tar
+            dist/pack-*.json
+            SHA256SUMS

@@ -5,6 +5,11 @@
 
 # Generated prepared runtime (assets + jniLibs staged for the APK)
 prepared/
+# APK 侧旧格式 payload（客体 .so 在 assets/<prefix>/lib/**；Gradle 消费这一份，
+# 见 docs/rom-package/04 §4 —— 产物，不是源码）
+prepared-apk/
+# ROM 包（dist/versebox-<id>-<version>.zip，docs/rom-package/05 §5）
+dist/
 
 # Redroid 9 image: tarball, extracted rootfs, and the path index
 downloads/

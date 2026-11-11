@@ -1,0 +1,37 @@
+# 必须留在 APK `lib/arm64-v8a` 的原生文件（Android 9 的 "execve 集合"）
+#
+# 谁读它：guest-runtime-a15/rom/pack-rom.py（新格式，写 files[].resident）与
+#          guest-runtime-a15/rom/stage-apk-payload.py（旧格式，决定哪个 .so 留在 APK 的 lib/）。
+# 两者都按本文件判断，不许在别处再写一份名字列表。
+#
+# 平台事实（2026-11-11 真机实测，A15 同一条结论）：App 进程的 SELinux 域是
+# u:r:untrusted_app，它对 app_data_file 只有 { read open map execute }、没有 execute_no_trans。
+# 于是 dlopen()/mmap(PROT_EXEC) 客体 .so 允许，execve() 一个 /data/... 下的 ELF 会 EACCES
+# （error=13）。APK 自带的 nativeLibraryDir 标签不同，execve 允许。
+# 判据：日志里 `Cannot run program ...: error=13, Permission denied` 就是这里漏了一条。
+#
+# 注意：run-as 不能用来做这个实验（本机 run-as 是 u:r:shell:s0，它**能** execve app_data_file）。
+#
+# ---------------------------------------------------------------- 逐调用点核实（A9）
+#
+# 1) ld-android.so
+#      宿主侧：FrameworkSession.command()/launch() 的 argv[0]（每一个 helper 都是它）；
+#             GuestRuntime.checkJava() 的 argv[0]；GuestDisplayPower 的 argv[0]。
+#      客体侧：vendor/runtime/filesystem/GuestExec.cpp 把任何 ET_DYN 的 execve 改写成
+#             execve($A10VM_EXEC_LINKER=<这个文件>, [loader, 程序, 参数...])。
+#      也就是全系统只有这一个文件真的被内核 execve；其余程序都是它的参数。
+# 2) seed-properties
+#      GuestRuntime.prepare() 用 ProcessBuilder 直接起它（属性区播种）。
+#
+# ---------------------------------------------------------------- A9 与 A15 的差异（别照抄 A15）
+#
+# * desktop-gpu-host：A9 的清单里没有这个逻辑名。A9 的桌面走宿主渲染器
+#   （NativeGraphicsSession 传入 gpu.sock，FrameworkSession.startDesktop 的 externalGraphics
+#   非空），所以不启动客体图形端点。写进来是无害的空操作，但会掩盖"A9 到底跑没跑它"。
+# * linker64：A9 的清单里没有这个逻辑名。rootfs/system/bin/linker64 是 nativeLinks 里的
+#   **软链**（target = ld-android.so），客体程序由上面那个被改写的 execve 交给 loader，
+#   内核从不直接 execve 它；kernel 解析 PT_INTERP 用的是宿主根，客体绝对路径在那里不存在。
+#
+# 格式：每行一个**逻辑名**（清单 files[].logical），# 之后是注释。
+ld-android.so
+seed-properties

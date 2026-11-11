@@ -8,23 +8,29 @@ plugins { id("com.android.library") }
 // scripts/prepare-a9.py in this module; -PguestRuntimeA9Prepared=<dir> overrides it.
 // Everything the guest needs at runtime (rootfs, prepared assets, jniLibs) is
 // produced here, and .gitignore keeps the multi-GB images out of the repository.
+//
+// 2026-11-12：APK 消费的是 **prepared-apk**（由本仓库 rom/stage-apk-payload.py 产出），
+// 不是 prepared/。区别只有一处、但很关键：客体 .so 在 prepared-apk 里是
+// assets/guest-runtime-a9/lib/**（清单 files[].libPath），**不在 jniLibs/**。于是 APK 的
+// lib/arm64-v8a 里只剩宿主库 + 被 execve 的那 2 个（rom/resident-native.txt：ld-android.so /
+// seed-properties —— untrusted_app 不能从 app_data_file execve，见 docs/rom-package/04 §3.2）。
+// 判据：unzip -l app-debug.apk 的 lib/arm64-v8a 里 liba9vm-* 只有那 2 个。
 val preparedRoot: File? = providers.gradleProperty("guestRuntimeA9Prepared").orNull
     ?.let { file(it) }
-val bundledRoot = projectDir.resolve("prepared")
+val bundledRoot = projectDir.resolve("prepared-apk")
 val runtimeRoot = preparedRoot ?: bundledRoot
 
 android {
     namespace = "io.a10vm.guestruntime.a9"
-    compileSdk = 35
+    compileSdk = 37
+    compileSdkMinor = 0
     defaultConfig { minSdk = 28 }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    sourceSets.getByName("main") {
-        jniLibs.srcDir(runtimeRoot.resolve("jniLibs"))
-        assets.srcDir(runtimeRoot.resolve("assets"))
-    }
+    // 目录注入移到下面的 androidComponents 块（AGP 9 的 sourceSets 库路径会抛
+    // ClassCastException: DefaultAndroidLibrarySourceSet -> AndroidLibrarySourceSet）。
 }
 
 fun sha256(file: File): String {
@@ -75,15 +81,44 @@ val verifyRuntimeA9 = tasks.register("verifyRuntimeA9") {
             check(logical !in setOf("liba9vm-malloc-leak-shim.so", "liba9vm-libdl-compat.so")) {
                 "ABI shim in A9 prepared: $logical"
             }
-            val file = runtimeRoot.resolve("jniLibs/arm64-v8a/" + entry["name"])
-            check(file.isFile) { "Missing A9 native input: $file" }
+            // 客体 .so 的位置由清单自己说（files[].libPath）：
+            //   旧格式（打进 APK）-> assets/guest-runtime-a9/lib/<name>
+            //   新格式（ROM 包）  -> payload/lib/<name>（那一份不经过 Gradle）
+            // 没有 libPath 的清单就是老行为（APK 的 lib/），只允许历史产物这么写。
+            // resident=true 的是被 execve 的那几个（linker / 属性播种器）：untrusted_app
+            // 不能从 app_data_file 执行，它们必须留在 APK 的 lib/ 里（rom/resident-native.txt）。
+            val libPath = entry["libPath"] as? String
+            val isResident = (entry["resident"] as? Boolean) == true
+            val file = if (isResident || libPath == null) runtimeRoot.resolve("jniLibs/arm64-v8a/" + entry["name"])
+                       else runtimeRoot.resolve("assets/" + libPath)
+            check(file.isFile) {
+                "Missing A9 native input: $file\n" +
+                        (if (libPath == null)
+                            "这份 prepared 还是老布局（.so 在 jniLibs/）。在 guest-runtime-a9 根目录跑：" +
+                                    "python rom/stage-apk-payload.py --prepared prepared --out prepared-apk"
+                        else "prepared-apk 不完整，重跑 rom/stage-apk-payload.py。")
+            }
             check(file.length() == (entry["bytes"] as Number).toLong()) {
                 "Size mismatch for $logical"
             }
             check(sha256(file) == entry["sha256"]) { "SHA-256 mismatch for $logical" }
             checked += 1
         }
-        logger.lifecycle("A9 runtime verified: $checked native files")
+        // 硬闸门：APK 的 lib/ 里只允许 resident 那几个客体文件（docs/rom-package/04 §4）。
+        val jniDir = runtimeRoot.resolve("jniLibs/arm64-v8a")
+        val allowed = files.map { (it as Map<*, *>) }
+            .filter { (it["resident"] as? Boolean) == true }
+            .map { it["name"] as String }
+            .toSet()
+        val present = jniDir.listFiles { f -> f.isFile && f.name.endsWith(".so") }
+            ?.map { it.name }?.toSet() ?: emptySet<String>()
+        check(present == allowed) {
+            "APK 的 lib/arm64-v8a 内容与 resident 清单不一致：" +
+                    "\n  多出来（不该在 APK 里）：" + (present - allowed) +
+                    "\n  缺少（必须在 APK 里，execve 只能从这里）：" + (allowed - present) +
+                    "\n修法：重跑 rom/stage-apk-payload.py 生成 prepared-apk"
+        }
+        logger.lifecycle("A9 runtime verified: $checked native files (payload layout)")
     }
 }
 tasks.named("preBuild").configure { dependsOn(verifyRuntimeA9) }
@@ -98,3 +133,35 @@ val prepareA9Runtime = tasks.register<Exec>("prepareA9Runtime") {
 }
 
 tasks.withType<org.gradle.api.tasks.bundling.Zip>().configureEach { isZip64 = true }
+
+// AGP 9 的官方目录注入点：按 variant 添加"静态源码目录"，等价于旧 sourceSets 的
+// jniLibs.srcDir / assets.srcDir，且不经过已废弃的 com.android.build.gradle.api.* 类型。
+// --------------------------------------------------------------- 旧格式 payload 的开关
+//
+// 旧格式（把整份 payload 摊在 APK 的 assets/<prefix>/ 里）与「ROM 入库」是**平行**的两条路：
+// 新格式的 ROM 走 app/rom-embed.json → build/rom-dist → assets/kanadex-rom/，
+// 这里只负责「旧描述文件 + 旧 payload」那一份（RomCatalog 读 assets/roms/*.yaml）。
+//
+// 本轮**默认仍然开着**，原因不是懒：关掉之后，rom_id 还是旧格式 id（android15，没有 @版本）
+// 的实例会先找不到旧描述、再找不到新包，启动会被闸门拦住。开着的唯一代价是 APK 里多一份
+// payload（~1.5 GB），这是"不把用户已经在用的虚拟机弄坏"的价格。
+//
+// 关掉的顺序（docs/rom-release/03 §3）：先确认设备上所有实例的 rom_id 都是 romKey，
+// 再传 -PverseboxLegacyPayload=false 打一次包，用真机把三台系统各起一次。
+val keepLegacyPayload = (providers.gradleProperty("verseboxLegacyPayload").orNull ?: "false").toBoolean()
+
+androidComponents {
+    onVariants { variant ->
+        // **本模块不再注入 jniLibs**：APK 的 lib/ 由 rom-embed 配置里的
+        // apk-resident-libs-*.tar 提供（:app:stageRomAssets → build/rom-dist/apk-libs）。
+        // 两边同时注入同名 .so 会在 AGP 合并阶段直接失败，而"哪几个 so 进 lib/"
+        // 只允许有一个来源（docs/rom-release/01-入库配置/02-构建链产物.md §4）。
+        //
+        // 旧格式 payload（assets/<prefix>/）默认也关掉：
+        // 需要它时用 -PverseboxLegacyPayload=true，或更好——在 rom-embed 配置里登记
+        // legacyPreparedApk，让构建链按配置引入（docs/rom-release/01-入库配置/03）。
+        if (keepLegacyPayload) {
+            variant.sources.assets?.addStaticSourceDirectory(runtimeRoot.resolve("assets").absolutePath)
+        }
+    }
+}

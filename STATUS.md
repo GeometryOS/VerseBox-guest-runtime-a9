@@ -350,3 +350,57 @@ runtime/build/lib/libm.so
 - 不再把 helper 进程的 A10 库预加载进 A9 客体；
 - 不在 ART 自检通过前启动系统服务；
 - 不再用全局符号并集审计代替按进程实际加载闭包的检查。
+---
+
+## 5. 2026-11-12 · 客体 .so 下沉与 ROM 包（A9 接入 `libMode=rom`）
+
+**这一节只写本轮产物与判据；开机验证尚未做（要维护者点一次启动）。**
+
+### 做了什么
+
+| 项 | 落点 |
+| --- | --- |
+| ROM 工具链（本仓库自带，不引用 A15） | `rom/pack-rom.py`、`rom/rom_hash.py`、`rom/stage-apk-payload.py` |
+| ROM 身份与 execve 集合 | `rom/rom.properties.yaml`（`id: android9` / `1.0.0` / `libMode: rom`）、`rom/resident-native.txt` |
+| 旧格式 payload（Gradle 消费） | `prepared-apk/`：983 个 .so 进 `assets/guest-runtime-a9/lib/`，`jniLibs` 只留 2 个 |
+| 新格式 ROM 包 | `dist/versebox-android9-1.0.0.zip`（509.2 MB / payload 1,197,276,481 B / 2200 文件） |
+| Gradle 闸门 | `verifyRuntimeA9` 按 `files[].libPath` 核对，并断言 `jniLibs` 里的 .so 恰好等于 resident 集合 |
+| 构建入口 | `scripts/build.sh` 末尾两步（`--skip-rom` 可跳过 ROM 包） |
+
+`scripts/prepare-a9.py` **一行未改**；运行时（`guest-runtime` 的 `RuntimeFiles`）沿用 A15 那一轮的三段解析，
+A9 侧没有改 Java。
+
+### execve 集合（逐调用点核实，不是抄 A15）
+
+```text
+ld-android.so      FrameworkSession.launch() 的 argv[0]、checkJava()、GuestDisplayPower，
+                   以及客体 GuestExec 的 A10VM_EXEC_LINKER：全系统唯一被内核 execve 的文件
+seed-properties    GuestRuntime.prepare() 用 ProcessBuilder 直接 execve
+```
+
+`desktop-gpu-host`（A9 没有这个逻辑名，桌面走宿主渲染器）与 `linker64`（A9 是 nativeLinks 的软链）
+**不在** A9 的清单里；理由写在 `rom/resident-native.txt` 与 `docs/android9-port/27` §2.1。
+
+### 判据（可复跑）
+
+```text
+python rom/stage-apk-payload.py --prepared prepared --out prepared-apk \
+    --manifest guest-runtime-a9-inputs.json --prefix guest-runtime-a9/
+  -> files 985 / resident 2 / payloadLibs 983 / libBytes 478902484 / data 1215
+
+python rom/pack-rom.py --prepared prepared --out dist/versebox-android9-1.0.0.zip
+  -> romKey android9@1.0.0, libMode rom, bundledLibs 985
+
+python rom/pack-rom.py --verify-only dist/versebox-android9-1.0.0.zip
+  -> ROM 包校验通过（509.2 MB）
+```
+
+### 未验证（不许写成已修复）
+
+1. 旧格式（打进 APK）A9 实例开机；2. 新格式（ROM zip）A9 实例开机；
+3. 已装好的 A9 实例自动迁移（`files/romlibs/guest-runtime-a9/` + `<实例>/vm/libs/` 应由运行时自己建出来）；
+4. A10 回归（A10 的清单没有 `libPath`，代码路径逐字不变，但没装机验）。
+
+判据见 `docs/android9-port/27` §7：`LIB instance libs 985/985` → `VERIFY 985/985` →
+`DATA 1215/1215` → `READY`，且 `framework-server.log` 里没有 `Cannot run program`。
+

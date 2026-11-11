@@ -1,0 +1,33 @@
+# ---------------------------------------------------------------- ROM 自述（输入）
+#
+# 这个文件属于**运行时仓库**（guest-runtime-a9），不属于 app。它保存 A9 ROM 的「身份」：
+# id / 名字 / 默认版本 / 客体 .so 的承载方式。规范见 app 仓库的
+# docs/rom-package/02-ROM包结构与命名.md 与 04-APK与ROM的边界.md。
+#
+# A9 / A10 / A15 是三个独立仓库：本仓库自带自己的打包器（rom/pack-rom.py）与
+# APK 侧 stager（rom/stage-apk-payload.py），不引用别的仓库的脚本。
+# 只 clone 本仓库就能出包：
+#
+#   python rom/pack-rom.py --prepared prepared
+#   python rom/stage-apk-payload.py --prepared prepared --out prepared-apk
+#
+# apiLevel 不在这里写：它由 prepared 的清单（prepare-a9.py 的产物 guestSdk=28）决定，
+# 自述里写了就必须与之一致（pack-rom.py 会断言）。payloadBytes / payloadSha256 由打包器
+# 按实际内容算出来，也不在这里写。
+schema: versebox-rom-properties/1
+id: android9
+name: Android 9
+androidVersion: "9"
+description: 独立 API 28 用户空间（Redroid 9 + AOSP 9 自建运行时）
+defaultRomVersion: 1.0.0
+
+# 客体 .so 的承载方式（docs/rom-package/04 §3.3）：
+#   apk  —— 客体 .so 仍由 APK 的 lib/arm64-v8a 提供，ROM 只带数据（旧行为）
+#   rom  —— 客体 .so 下沉到 ROM 的 payload/lib（**默认**）
+#   both —— 两边都有，运行时优先 ROM、缺了回落旧格式 payload（灰度用）
+#
+# 与 A15 同一个结论、同一套判据（2026-11-11 真机实测，见 _audit/coding-log/2026-11-11-*）：
+# App 进程在 u:r:untrusted_app 域，对 app_data_file 有 execute 但没有 execute_no_trans，
+# 所以**被 dlopen 的库**可以下沉，**被 execve 的文件**必须留在 APK 的 lib/
+# （逐个列在 rom/resident-native.txt 里，打包器与 stager 都读那一份）。
+libMode: rom
