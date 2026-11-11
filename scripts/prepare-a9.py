@@ -33,10 +33,16 @@ OUT = A9 / "prepared"
 ASSET_PREFIX = "guest-runtime-a9/"
 NDK = Path(os.environ.get("ANDROID_NDK_HOME",
     r"C:/Users/22437/AppData/Local/Android/Sdk/ndk/29.0.14206865"))
-READELF = NDK / "toolchains" / "llvm" / "prebuilt" / "windows-x86_64" / "bin" / "llvm-readelf.exe"
+# 构建工具的主机三元组与可执行后缀：硬编码 windows-x86_64 会在 Linux CI 上
+# 找不到 llvm-readelf / d8（真机与 CI 都要能跑，不许只对本机成立）。
+HOST_TAG = ("windows-x86_64" if os.name == "nt"
+            else "darwin-x86_64" if sys.platform == "darwin" else "linux-x86_64")
+EXE = ".exe" if os.name == "nt" else ""
+READELF = NDK / "toolchains" / "llvm" / "prebuilt" / HOST_TAG / "bin" / ("llvm-readelf" + EXE)
 SDK = Path(os.environ.get("ANDROID_HOME", r"C:/Users/22437/AppData/Local/Android/Sdk"))
 ANDROID_JAR = SDK / "platforms" / "android-35" / "android.jar"
-D8 = SDK / "build-tools" / "35.0.0" / "d8.bat"
+# build-tools 里 Windows 是 d8.bat（要 cmd /c），其余平台是可执行的 d8。
+D8 = SDK / "build-tools" / "35.0.0" / ("d8.bat" if os.name == "nt" else "d8")
 
 A9_32BIT_PREFIXES = ("system/lib/", "vendor/lib/", "odm/lib/", "oem/lib/",
                      "system/framework/arm/", "system/fake-libs/")
@@ -779,8 +785,9 @@ def d8(classes, destination):
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
     class_files = [str(x) for x in classes.rglob("*.class")]
-    command = ["cmd", "/c", str(D8), "--min-api", "28", "--lib", str(ANDROID_JAR),
-               "--output", str(destination)] + class_files
+    launcher = ["cmd", "/c", str(D8)] if str(D8).endswith(".bat") else [str(D8)]
+    command = launcher + ["--min-api", "28", "--lib", str(ANDROID_JAR),
+                          "--output", str(destination)] + class_files
     run_tool(command, "d8")
 
 
