@@ -233,3 +233,34 @@ def main():
 
 if __name__ == "__main__":
     main()
+# --------------------------------------------------------------------------
+# 4. linker_main.cpp: 关掉 debuggerd（AOSP 9 的 include 是无条件的）
+# --------------------------------------------------------------------------
+#
+# stock AOSP 9 里是 `#ifdef __ANDROID__` + `#include "debuggerd/handler.h"`；
+# 一旦真的把 handler.h 拉进来，还要再链 debuggerd 的实现（--no-undefined 会拦）。
+# 私有 linker 不需要它：A15 的 platform.patch 同样把这段换成 A10VM_DEBUGGERD 并保持关闭。
+# 这里按"看 #ifdef 之后 12 行内是否出现 debuggerd"来关断，不依赖具体空格与顺序。
+def patch_linker_main():
+    src = UP / "linker_main.cpp"
+    dst = OUT / "linker_main.cpp"
+    lines = src.read_text(encoding="utf-8").splitlines(keepends=True)
+    out = []
+    disabled = 0
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped in ("#ifdef __ANDROID__", "#ifdef A10VM_DEBUGGERD"):
+            window = "".join(lines[index + 1:index + 13])
+            if "debuggerd" in window:
+                out.append("#if 0  # debuggerd disabled (A9 private linker)\n")
+                disabled += 1
+                continue
+        out.append(line)
+    if disabled == 0:
+        raise SystemExit("patch-linker-a9: linker_main.cpp 里找不到 debuggerd 的 #ifdef 锚点")
+    OUT.mkdir(parents=True, exist_ok=True)
+    dst.write_text("".join(out), encoding="utf-8")
+    print("patched: %s (debuggerd blocks disabled: %d)" % (dst, disabled))
+
+
+patch_linker_main()
