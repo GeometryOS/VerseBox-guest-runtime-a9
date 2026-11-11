@@ -1,0 +1,86 @@
+diff --git a/common/ChecksumCalculator.cpp b/common/ChecksumCalculator.cpp
+--- a/common/ChecksumCalculator.cpp
++++ b/common/ChecksumCalculator.cpp
+@@ -17,5 +17,7 @@
+ #include "ChecksumCalculator.h"
+ 
++#ifndef A10VM_NO_SNAPSHOTS
+ #include "android/base/files/Stream.h"
++#endif
+ 
+ #include <string>
+@@ -144,2 +146,3 @@
++#ifndef A10VM_NO_SNAPSHOTS
+ void ChecksumCalculator::save(android::base::Stream* stream) {
+     assert(!m_isEncodingChecksum);
+@@ -172,2 +175,3 @@
+     m_numWrite = stream->getBe32();
+ }
++#endif
+diff --git a/common/ChecksumCalculator.h b/common/ChecksumCalculator.h
+--- a/common/ChecksumCalculator.h
++++ b/common/ChecksumCalculator.h
+@@ -127,3 +127,5 @@
+ public:
+     static constexpr size_t kMaxChecksumLength = 8;
++    // The paired emugen still emits the old constant name.
++    static constexpr size_t kMaxChecksumSize = kMaxChecksumLength;
+ 
+@@ -178,6 +178,8 @@
++#ifndef A10VM_NO_SNAPSHOTS
+     // Snapshot support.
+     void save(android::base::Stream* stream);
+     void load(android::base::Stream* stream);
++#endif
+ 
+ private:
+diff --git a/common/GLSharedGroup.h b/common/GLSharedGroup.h
+--- a/common/GLSharedGroup.h
++++ b/common/GLSharedGroup.h
+@@ -39,5 +39,7 @@
+-#include <utils/threads.h>
++#include <utils/Mutex.h>
+ #include "FixedBuffer.h"
++#ifndef A10VM_NO_DMA
+ #include "auto_goldfish_dma_context.h"
++#endif
+ #include "IndexRangeCache.h"
+ #include "SmartPtr.h"
+@@ -64,3 +66,5 @@
++#ifndef A10VM_NO_DMA
+     // DMA support
+     AutoGoldfishDmaContext dma_buffer;
++#endif
+ };
+diff --git a/encoder/GL2Encoder.cpp b/encoder/GL2Encoder.cpp
+--- a/encoder/GL2Encoder.cpp
++++ b/encoder/GL2Encoder.cpp
+@@ -3016,2 +3016,6 @@
++#ifdef A10VM_NO_DMA
++    RET_AND_SET_ERROR_IF(ctx->hasExtension("ANDROID_EMU_dma_v2"), GL_INVALID_OPERATION, NULL);
++    return s_glMapBufferRangeAEMUImpl(ctx, target, offset, length, access, buf);
++#else
+     if (ctx->hasExtension("ANDROID_EMU_dma_v2")) {
+         if (buf->dma_buffer.get().size < length) {
+@@ -3046,5 +3050,6 @@
+     } else {
+         return s_glMapBufferRangeAEMUImpl(ctx, target, offset, length, access, buf);
+     }
++#endif
+ }
+ 
+@@ -3074,2 +3079,3 @@
++#ifndef A10VM_NO_DMA
+     if (buf->dma_buffer.get().mapped_addr) {
+         memcpy(static_cast<char*>(buf->m_fixedBuffer.ptr()) + buf->m_mappedOffset,
+@@ -3086,2 +3092,3 @@
+     } else {
++#endif
+         ctx->glUnmapBufferAEMU(
+@@ -3095,4 +3102,6 @@
+                 (void*)((char*)buf->m_fixedBuffer.ptr() + buf->m_mappedOffset),
+                 &host_res);
++#ifndef A10VM_NO_DMA
+     }
++#endif
+ 

@@ -1,0 +1,105 @@
+diff --git a/egl/eglDisplay.cpp b/egl/eglDisplay.cpp
+--- a/egl/eglDisplay.cpp
++++ b/egl/eglDisplay.cpp
+@@ -16,7 +16,8 @@
+ #include "eglDisplay.h"
+ #include "HostConnection.h"
+ #include "KeyedVectorUtils.h"
++#include "ErrorLog.h"
+ 
+ #ifdef HOST_BUILD
+ #include "android/base/files/PathUtils.cpp"
+@@ -35,10 +36,10 @@
+ //  NOTE that each extension name should be suffixed with space
+ static const char systemStaticEGLExtensions[] =
+             "EGL_ANDROID_image_native_buffer "
+             "EGL_KHR_fence_sync "
+             "EGL_KHR_image_base "
+-            "EGL_KHR_gl_texture_2d_image ";
++            "EGL_KHR_gl_texture_2D_image ";
+-
++
+ // extensions to add dynamically depending on host-side support
+ static const char kDynamicEGLExtNativeSync[] = "EGL_ANDROID_native_fence_sync ";
+ static const char kDynamicEGLExtWaitSync[] = "EGL_KHR_wait_sync ";
+@@ -295,4 +295,5 @@
+     path += basename;
+     path += LIBSUFFIX;
+-    void *lib = dlopen(path.c_str(), RTLD_NOW);
++    path = std::string(basename) + LIBSUFFIX;
++    void *lib = dlopen(path.c_str(), RTLD_NOW);
+ #endif
+@@ -503,9 +504,9 @@
+ {
+     EGLint value = 0;
+-    DBG("^^^^^^^^^^ dumpConfig %d ^^^^^^^^^^^^^^^^^^", (int)config);
++    DBG("^^^^^^^^^^ dumpConfig %ld ^^^^^^^^^^^^^^^^^^", (long)(intptr_t)config);
+     for (int i=0; i<m_numConfigAttribs; i++) {
+         getAttribValue(config, i, &value);
+-        DBG("{%d}[%d] %d\n", (int)config, i, value);
++        DBG("{%ld}[%d] %d\n", (long)(intptr_t)config, i, value);
+     }
+ }
+diff --git a/gralloc/gralloc.cpp b/gralloc/gralloc.cpp
+--- a/gralloc/gralloc.cpp
++++ b/gralloc/gralloc.cpp
+@@ -23,12 +23,8 @@
+ #include <sys/mman.h>
+ 
+-#if PLATFORM_SDK_VERSION < 28
+ #include "gralloc_cb.h"
+-#else
+-#include "../../shared/OpenglCodecCommon/gralloc_cb.h"
+-#endif
+ 
+ #include "goldfish_dma.h"
+ #include "FormatConversions.h"
+@@ -149,6 +145,7 @@
+ static gralloc_dmaregion_t* init_gralloc_dmaregion(ExtendedRCEncoderContext *rcEnc) {
++    if (rcEnc->getDmaVersion() == DMA_IMPL_NONE) return nullptr;
+     D("%s: call\n", __func__);
+     if (!s_grdma) {
+         s_grdma = new gralloc_dmaregion_t(rcEnc);
+     }
+     return s_grdma;
+@@ -157,4 +153,5 @@
+ static void get_gralloc_region(ExtendedRCEncoderContext *rcEnc) {
++    if (rcEnc->getDmaVersion() == DMA_IMPL_NONE) return;
+     gralloc_dmaregion_t* grdma = init_gralloc_dmaregion(rcEnc);
+ 
+     pthread_mutex_lock(&grdma->lock);
+@@ -194,4 +191,5 @@
+ static bool put_gralloc_region(ExtendedRCEncoderContext *rcEnc, uint32_t sz) {
++    if (rcEnc->getDmaVersion() == DMA_IMPL_NONE) return false;
+     bool shouldDelete;
+ 
+     gralloc_dmaregion_t* grdma = init_gralloc_dmaregion(rcEnc);
+@@ -750,5 +748,4 @@
+-            gralloc_dmaregion_t* grdma = init_gralloc_dmaregion(rcEnc);
+             hostCon->lock();
+             if (rcEnc->getDmaVersion() > 0) {
+                 cb->hostHandle = rcEnc->rcCreateColorBufferDMA(rcEnc, w, h, allocFormat, cb->emuFrameworkFormat);
+@@ -766,11 +763,6 @@
+         } else {
+-            QEMU_PIPE_HANDLE refcountPipeFd = qemu_pipe_open("refcount");
+-            if(qemu_pipe_valid(refcountPipeFd)) {
+-                cb->setRefcountPipeFd(refcountPipeFd);
+-                qemu_pipe_write(refcountPipeFd, &cb->hostHandle, 4);
+-            }
+             D("Created host ColorBuffer 0x%x\n", cb->hostHandle);
+         }
+ 
+         if (isHidlGralloc) { *getOpenCountPtr(cb) = 0; }
+diff --git a/egl/egl.cpp b/egl/egl.cpp
+--- a/egl/egl.cpp
++++ b/egl/egl.cpp
+@@ -768,6 +768,9 @@
+         extEnd++;
+     }
+ 
++    if (extStart < hostStrLen) {
++        res.push_back(std::string(hostStr + extStart, hostStrLen - extStart));
++    }
+     delete [] hostStr;
+     return res;
+ }

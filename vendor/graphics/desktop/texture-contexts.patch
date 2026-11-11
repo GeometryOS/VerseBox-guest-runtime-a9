@@ -1,0 +1,20 @@
+diff --git a/egl/egl.cpp b/egl/egl.cpp
+--- a/egl/egl.cpp
++++ b/egl/egl.cpp
+@@ -18,3 +18,4 @@
+ #include <assert.h>
+ #include "HostConnection.h"
++#include "GuestTextureContexts.h"
+ #include "ThreadInfo.h"
+@@ -241,5 +242,6 @@
+         sharedGroup = shareCtx->getSharedGroup();
+     else
+         sharedGroup = GLSharedGroupPtr(new GLSharedGroup());
++    guesttextures::added(sharedGroup.constPtr());
+     assert(dpy == (EGLDisplay)&s_display);
+     s_display.onCreateContext((EGLContext)this);
+@@ -255,3 +257,4 @@
+ EGLContext_t::~EGLContext_t()
+ {
++    guesttextures::removed(sharedGroup.constPtr());
+     if (goldfishSyncFd > 0) {

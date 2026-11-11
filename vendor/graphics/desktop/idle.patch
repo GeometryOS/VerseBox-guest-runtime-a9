@@ -1,0 +1,92 @@
+diff --git a/hwc2/EmuHWC2.h b/hwc2/EmuHWC2.h
+--- a/hwc2/EmuHWC2.h
++++ b/hwc2/EmuHWC2.h
+@@ -28,4 +28,5 @@
+ #include <atomic>
++#include <condition_variable>
+ #include <map>
+ #include <mutex>
+@@ -317,2 +318,3 @@
+     private:
++        void presentClientTarget(int32_t* outRetireFence);
+         EmuHWC2& mDevice;
+@@ -325,3 +327,5 @@
+         uint32_t mVsyncPeriod;
++        std::condition_variable mVsyncCondition;
+         sp<VsyncThread> mVsyncThread;
+         FencedBuffer mClientTarget;
++        bool mClientTargetPending = false;
+         // Will only be non-null after the Display has been validated and
+diff --git a/hwc2/EmuHWC2.cpp b/hwc2/EmuHWC2.cpp
+--- a/hwc2/EmuHWC2.cpp
++++ b/hwc2/EmuHWC2.cpp
+@@ -424,3 +424,8 @@
+ EmuHWC2::Display::~Display() {
++    {
++        std::lock_guard<std::mutex> lock(mStateMutex);
++        mVsyncThread->requestExit();
++    }
++    mVsyncCondition.notify_all();
+     mVsyncThread->requestExitAndWait();
+ }
+@@ -725,4 +730,3 @@
+             ALOGVV("No layers, exit");
+-            mGralloc->getFb()->post(mGralloc->getFb(), mClientTarget.getBuffer());
+-            *outRetireFence = mClientTarget.getFence();
++            presentClientTarget(outRetireFence);
+             return Error::None;
+@@ -828,4 +832,3 @@
+         // we set all layers Composition::Client, so do nothing.
+-        mGralloc->getFb()->post(mGralloc->getFb(), mClientTarget.getBuffer());
+-        *outRetireFence = mClientTarget.getFence();
++        presentClientTarget(outRetireFence);
+         ALOGV("%s fallback to post, returns outRetireFence %d",
+@@ -855,3 +858,11 @@
++void EmuHWC2::Display::presentClientTarget(int32_t* outRetireFence) {
++    if (mClientTargetPending &&
++            mGralloc->getFb()->post(mGralloc->getFb(), mClientTarget.getBuffer()) == 0) {
++        mClientTargetPending = false;
++    }
++    *outRetireFence = mClientTarget.getFence();
++}
++
+ Error EmuHWC2::Display::setClientTarget(buffer_handle_t target,
+         int32_t acquireFence, int32_t /*dataspace*/, hwc_region_t /*damage*/) {
+@@ -866,4 +877,5 @@
+     mClientTarget.setBuffer(target);
+     mClientTarget.setFence(acquireFence);
++    mClientTargetPending = true;
+     return Error::None;
+ }
+@@ -932,4 +944,5 @@
+     mPowerMode = mode;
++    mVsyncCondition.notify_all();
+     return Error::None;
+ }
+@@ -958,4 +971,5 @@
+     mVsyncEnabled = enable;
++    mVsyncCondition.notify_all();
+     return Error::None;
+ }
+@@ -1174,3 +1188,22 @@
++    const auto active = [this] {
++        return mDisplay.mVsyncEnabled == Vsync::Enable &&
++               mDisplay.mPowerMode != PowerMode::Off &&
++               mDisplay.mPowerMode != PowerMode::DozeSuspend;
++    };
+     while (!exitPending()) {
++        {
++            std::unique_lock<std::mutex> lock(mDisplay.mStateMutex);
++            if (!active()) {
++                mDisplay.mVsyncCondition.wait(lock, [&] { return exitPending() || active(); });
++                if (exitPending()) break;
++                if (clock_gettime(CLOCK_MONOTONIC, &rt) == -1) return false;
++                deadline = desktopvsync::nanos(rt) + period;
++            }
++        }
+         const timespec next = desktopvsync::time(deadline);
+@@ -1192,3 +1225,3 @@
+         std::unique_lock<std::mutex> lock(mDisplay.mStateMutex);
+-        const bool vsyncEnabled = (mDisplay.mVsyncEnabled == Vsync::Enable);
++        const bool vsyncEnabled = active();
+         lock.unlock();

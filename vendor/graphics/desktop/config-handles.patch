@@ -1,0 +1,88 @@
+diff --git a/egl/egl.cpp b/egl/egl.cpp
+--- a/egl/egl.cpp
++++ b/egl/egl.cpp
+@@ -19,6 +19,8 @@
+ #include "ThreadInfo.h"
+ #include "eglDisplay.h"
++#include "EglConfigHandle.h"
++#include <vector>
+ #include "eglSync.h"
+@@ -122,5 +124,5 @@
+ #define VALIDATE_CONFIG(cfg,ret) \
+-    if(((intptr_t)(cfg)<0)||((intptr_t)(cfg)>s_display.getNumConfigs())) { \
++    if (!a10egl::validConfig(cfg, s_display.getNumConfigs())) { \
+         RETURN_ERROR(ret,EGL_BAD_CONFIG); \
+     }
+@@ -411,2 +413,2 @@
+-    rcSurface = rcEnc->rcCreateWindowSurface(rcEnc, (uintptr_t)config,
++    rcSurface = rcEnc->rcCreateWindowSurface(rcEnc, a10egl::configIndex(config),
+             getWidth(), getHeight());
+@@ -671,2 +673,2 @@
+-    rcSurface = rcEnc->rcCreateWindowSurface(rcEnc, (uintptr_t)config,
++    rcSurface = rcEnc->rcCreateWindowSurface(rcEnc, a10egl::configIndex(config),
+             getWidth(), getHeight());
+     if (!rcSurface) {
+@@ -936,2 +938,2 @@
+-    if(!num_config) {
++    if (!num_config || config_size < 0) {
+         RETURN_ERROR(EGL_FALSE,EGL_BAD_PARAMETER);
+@@ -948,2 +950,2 @@
+     for (i = 0 ; i < numConfigs && i < config_size ; i++) {
+-        *configs++ = (EGLConfig)(uintptr_t)i;
++        *configs++ = a10egl::configHandle(i);
+     }
+@@ -958,3 +960,3 @@
+-    if (!num_config) {
++    if (!num_config || config_size < 0) {
+         setErrorReturn(EGL_BAD_PARAMETER, EGL_FALSE);
+     }
+@@ -986,10 +988,11 @@
+-    uint32_t* tempConfigs[config_size];
++    if (configs && config_size == 0) {
++        *num_config = 0;
++        return EGL_TRUE;
++    }
++    std::vector<uint32_t> tempConfigs(configs ? config_size : 0);
+     DEFINE_AND_VALIDATE_HOST_CONNECTION(EGL_FALSE);
+     *num_config = rcEnc->rcChooseConfig(rcEnc,
+             local_attrib_list ? local_attrib_list:(EGLint*)attrib_list,
+-            attribs_size * sizeof(EGLint), (uint32_t*)tempConfigs, config_size);
++            attribs_size * sizeof(EGLint),
++            tempConfigs.empty() ? nullptr : tempConfigs.data(), config_size);
+
+     if (local_attrib_list) delete [] local_attrib_list;
+-    if (*num_config <= 0) {
++    if (*num_config < 0) {
+         EGLint err = -(*num_config);
+@@ -1009,2 +1012,2 @@
+         for (i=0;i<(*num_config);i++) {
+-             *((uintptr_t*)configs+i) = *((uint32_t*)tempConfigs+i);
++             configs[i] = a10egl::configHandle(tempConfigs[i]);
+         }
+@@ -1617,2 +1620,2 @@
+-    uint32_t rcContext = rcEnc->rcCreateContext(rcEnc, (uintptr_t)config, rcShareCtx, rcMajorVersion);
++    uint32_t rcContext = rcEnc->rcCreateContext(rcEnc, a10egl::configIndex(config), rcShareCtx, rcMajorVersion);
+     if (!rcContext) {
+         ALOGE("rcCreateContext returned 0");
+diff --git a/egl/eglDisplay.cpp b/egl/eglDisplay.cpp
+--- a/egl/eglDisplay.cpp
++++ b/egl/eglDisplay.cpp
+@@ -16,4 +16,5 @@
+ #include "eglDisplay.h"
++#include "EglConfigHandle.h"
+ #include "HostConnection.h"
+@@ -207,2 +208,2 @@
+     for (intptr_t i=0; i<m_numConfigs; i++) {
+-        EGLConfig config = (EGLConfig)i;
++        EGLConfig config = a10egl::configHandle(i);
+         PixelFormat format;
+@@ -463,2 +464,2 @@
+     }
+-    *value = *(m_configs + (intptr_t)config*m_numConfigAttribs + attribIdx);
++    *value = *(m_configs + a10egl::configIndex(config)*m_numConfigAttribs + attribIdx);
+     return EGL_TRUE;
+@@ -521,2 +522,2 @@
+     }
+-    *(m_configs + (intptr_t)config*m_numConfigAttribs + attribIdx) = value;
++    *(m_configs + a10egl::configIndex(config)*m_numConfigAttribs + attribIdx) = value;
+     return EGL_TRUE;

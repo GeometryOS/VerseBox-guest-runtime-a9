@@ -1,0 +1,40 @@
+diff --git a/FormatConversions.cpp b/FormatConversions.cpp
+--- a/FormatConversions.cpp
++++ b/FormatConversions.cpp
+@@ -90,7 +90,7 @@ void rgb565_to_yv12(char* dest, char* src, int width, int height,
+         uint8_t *yv12_v = yv12_v0 + (j/2) * cStride;
+         uint8_t *yv12_u = yv12_v + cSize;
+-        uint16_t *rgb_ptr = rgb_ptr0 + get_rgb_offset(j, width, rgb_stride);
++        uint16_t *rgb_ptr = rgb_ptr0 + j * width;
+         bool jeven = (j & 1) == 0;
+         for (int i = left; i <= right; ++i) {
+@@ -105,7 +105,7 @@ void rgb565_to_yv12(char* dest, char* src, int width, int height,
+             bool ieven = (i & 1) == 0;
+             if (jeven && ieven) {
+-                yv12_u[i] = clamp_rgb((( -43 * R - 85 * G + 128 * B) >> 8) + 128);
+-                yv12_v[i] = clamp_rgb((( 128 * R - 107 * G - 21 * B) >> 8) + 128);
++                yv12_u[i / 2] = clamp_rgb((( -43 * R - 85 * G + 128 * B) >> 8) + 128);
++                yv12_v[i / 2] = clamp_rgb((( 128 * R - 107 * G - 21 * B) >> 8) + 128);
+             }
+@@ -144,7 +144,7 @@ void rgb888_to_yv12(char* dest, char* src, int width, int height,
+             bool ieven = (i & 1) == 0;
+             if (jeven && ieven) {
+-                yv12_u[i] = clamp_rgb((( -43 * R - 85 * G + 128 * B) >> 8) + 128);
+-                yv12_v[i] = clamp_rgb((( 128 * R - 107 * G - 21 * B) >> 8) + 128);
++                yv12_u[i / 2] = clamp_rgb((( -43 * R - 85 * G + 128 * B) >> 8) + 128);
++                yv12_v[i / 2] = clamp_rgb((( 128 * R - 107 * G - 21 * B) >> 8) + 128);
+             }
+@@ -178,7 +178,7 @@ void rgb888_to_yuv420p(char* dest, char* src, int width, int height,
+             bool ieven = (i & 1) == 0;
+             if (jeven && ieven) {
+-                yv12_u[i] = clamp_rgb((( -43 * R - 85 * G + 128 * B) >> 8) + 128);
+-                yv12_v[i] = clamp_rgb((( 128 * R - 107 * G - 21 * B) >> 8) + 128);
++                yv12_u[i / 2] = clamp_rgb((( -43 * R - 85 * G + 128 * B) >> 8) + 128);
++                yv12_v[i / 2] = clamp_rgb((( 128 * R - 107 * G - 21 * B) >> 8) + 128);
+             }
+@@ -207,7 +207,7 @@ void yv12_to_rgb565(char* dest, char* src, int width, int height,
+         uint8_t *yv12_v = yv12_v0 + (j/2) * cStride;
+         uint8_t *yv12_u = yv12_v + cSize;
+-        uint16_t *rgb_ptr = rgb_ptr0 + get_rgb_offset(j, width, rgb_stride);
++        uint16_t *rgb_ptr = rgb_ptr0 + (j - top) * (right - left + 1);
+         for (int i = left; i <= right; ++i) {

@@ -1,0 +1,120 @@
+diff --git a/hwc2/EmuHWC2.h b/hwc2/EmuHWC2.h
+--- a/hwc2/EmuHWC2.h
++++ b/hwc2/EmuHWC2.h
+@@ -187,4 +187,5 @@
+     class Display {
+     public:
+         Display(EmuHWC2& device, HWC2::DisplayType type);
++        ~Display();
+         hwc2_display_t getId() const {return mId;}
+@@ -320,5 +321,5 @@
+         HWC2::PowerMode mPowerMode;
+         HWC2::Vsync mVsyncEnabled;
+         uint32_t mVsyncPeriod;
+-        VsyncThread mVsyncThread;
++        sp<VsyncThread> mVsyncThread;
+         FencedBuffer mClientTarget;
+diff --git a/hwc2/EmuHWC2.cpp b/hwc2/EmuHWC2.cpp
+--- a/hwc2/EmuHWC2.cpp
++++ b/hwc2/EmuHWC2.cpp
+@@ -16,1 +16,3 @@
++#include "DesktopDisplay.h"
++#include "VsyncSchedule.h"
+ #include "EmuHWC2.h"
+@@ -404,5 +404,5 @@
+     mPowerMode(PowerMode::Off),
+     mVsyncEnabled(Vsync::Invalid),
+-    mVsyncPeriod(1000*1000*1000/60), // vsync is 60 hz
++    mVsyncPeriod(desktopdisplay::vsyncNanos),
+-    mVsyncThread(*this),
++    mVsyncThread(new VsyncThread(*this)),
+     mClientTarget(),
+@@ -418,5 +418,9 @@
+     {
+-        mVsyncThread.run("", HAL_PRIORITY_URGENT_DISPLAY);
++        mVsyncThread->run("", HAL_PRIORITY_URGENT_DISPLAY);
+     }
+ 
++EmuHWC2::Display::~Display() {
++    mVsyncThread->requestExitAndWait();
++}
++
+ Error EmuHWC2::Display::acceptChanges() {
+@@ -1160,49 +1166,50 @@
+     int64_t lastLogged = rt.tv_sec;
+     int sent = 0;
+     int lastSent = 0;
+-    bool vsyncEnabled = false;
+-    struct timespec wait_time;
+-    wait_time.tv_sec = 0;
+-    wait_time.tv_nsec = mDisplay.mVsyncPeriod;
++    const int64_t period = mDisplay.mVsyncPeriod;
++    int64_t deadline = desktopvsync::nanos(rt) + period;
+-
++
+-    while (true) {
+-        int err = nanosleep(&wait_time, NULL);
+-        if (err == -1) {
+-            if (errno == EINTR) {
+-                break;
+-            }
+-            ALOGE("%s: error in vsync thread: %s", __FUNCTION__, strerror(errno));
+-        }
++    while (!exitPending()) {
++        const timespec next = desktopvsync::time(deadline);
++        int err;
++        do {
++            err = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
++        } while (err == EINTR && !exitPending());
++        if (exitPending()) break;
++        if (err) {
++            ALOGE("%s: error in vsync thread: %s", __FUNCTION__, strerror(err));
++            return false;
++        }
++        if (clock_gettime(CLOCK_MONOTONIC, &rt) == -1) return false;
++        const int64_t now = desktopvsync::nanos(rt);
++        deadline = desktopvsync::next(deadline, now, period);
++        const int64_t timestamp = deadline - period;
+-
++
+         std::unique_lock<std::mutex> lock(mDisplay.mStateMutex);
+-        vsyncEnabled = (mDisplay.mVsyncEnabled == Vsync::Enable);
++        const bool vsyncEnabled = (mDisplay.mVsyncEnabled == Vsync::Enable);
+         lock.unlock();
+-
++
+         if (!vsyncEnabled) {
+             continue;
+         }
+-
++
+-        if (clock_gettime(CLOCK_MONOTONIC, &rt) == -1) {
+-            ALOGE("%s: error in vsync thread clock_gettime: %s",
+-                 __FUNCTION__, strerror(errno));
+-        }
+-
+-        int64_t timestamp = int64_t(rt.tv_sec) * 1e9 + rt.tv_nsec;
+-
+-        lock.lock();
+-        const auto& callbackInfo = mDisplay.mDevice.mCallbacks[Callback::Vsync];
+-        auto vsync = reinterpret_cast<HWC2_PFN_VSYNC>(callbackInfo.pointer);
+-        lock.unlock();
++        hwc2_callback_data_t data = nullptr;
++        HWC2_PFN_VSYNC vsync = nullptr;
++        {
++            std::lock_guard<std::mutex> callbacks(mDisplay.mDevice.mStateMutex);
++            const auto callback = mDisplay.mDevice.mCallbacks.find(Callback::Vsync);
++            if (callback != mDisplay.mDevice.mCallbacks.end()) {
++                data = callback->second.data;
++                vsync = reinterpret_cast<HWC2_PFN_VSYNC>(callback->second.pointer);
++            }
++        }
+-
++
+         if (vsync) {
+-            vsync(callbackInfo.data, mDisplay.mId, timestamp);
++            vsync(data, mDisplay.mId, timestamp);
+         }
+-
++
+         if (rt.tv_sec - lastLogged >= logInterval) {

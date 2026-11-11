@@ -1,0 +1,29 @@
+diff --git a/egl/egl.cpp b/egl/egl.cpp
+--- a/egl/egl.cpp
++++ b/egl/egl.cpp
+@@ -2028,6 +2028,10 @@
+         }
+ 
++        const uint32_t hostBuffer = grallocHelper->getHostHandle(native_buffer->handle);
++        if (!hostBuffer || rcEnc->rcOpenColorBuffer2(rcEnc, hostBuffer) != 0) {
++            setErrorReturn(EGL_BAD_PARAMETER, EGL_NO_IMAGE_KHR);
++        }
+         native_buffer->common.incRef(&native_buffer->common);
+ 
+         EGLImage_t *image = new EGLImage_t();
+         image->dpy = dpy;
+         image->target = target;
+         image->native_buffer = native_buffer;
+ 
+         return (EGLImageKHR)image;
+@@ -2074,6 +2078,9 @@
+         if (native_buffer->common.version != sizeof(android_native_buffer_t))
+             setErrorReturn(EGL_BAD_PARAMETER, EGL_FALSE);
+ 
++        DEFINE_AND_VALIDATE_HOST_CONNECTION(EGL_FALSE);
++        rcEnc->rcCloseColorBuffer(rcEnc, grallocHelper->getHostHandle(native_buffer->handle));
++        hostCon->flush();
+         native_buffer->common.decRef(&native_buffer->common);
+         delete image;
+ 
+         return EGL_TRUE;
