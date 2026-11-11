@@ -9,12 +9,17 @@
 # loads it like any other guest executable and jumps to _start, which only
 # issues exit_group(0).
 set -eu
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) HOST_TAG=windows-x86_64; EXE=.exe ;;
+    Darwin)               HOST_TAG=darwin-x86_64;  EXE= ;;
+    *)                    HOST_TAG=linux-x86_64;   EXE= ;;
+esac
 MODULE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 NDK=${ANDROID_NDK_HOME:-"$HOME/Android/Sdk/ndk/29.0.14206865"}
 CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
 if [ ! -x "$CLANG" ]; then
     # Windows NDK layout, used by the main workspace.
-    CLANG="$NDK/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"
+    CLANG="$NDK/toolchains/llvm/prebuilt/$HOST_TAG/bin/clang$EXE"
 fi
 test -x "$CLANG"
 OUT="$MODULE/bridges/bin"

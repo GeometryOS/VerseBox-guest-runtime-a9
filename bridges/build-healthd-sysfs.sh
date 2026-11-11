@@ -5,11 +5,16 @@
 # uses the project's health HAL.  This wrapper redirects only that prefix to
 # the per-instance battery-sysfs directory the host keeps up to date.
 set -eu
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) HOST_TAG=windows-x86_64; EXE=.exe ;;
+    Darwin)               HOST_TAG=darwin-x86_64;  EXE= ;;
+    *)                    HOST_TAG=linux-x86_64;   EXE= ;;
+esac
 MODULE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 NDK=${ANDROID_NDK_HOME:-"$HOME/Android/Sdk/ndk/29.0.14206865"}
 CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
 if [ ! -x "$CLANG" ]; then
-    CLANG="$NDK/toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"
+    CLANG="$NDK/toolchains/llvm/prebuilt/$HOST_TAG/bin/clang$EXE"
 fi
 test -x "$CLANG"
 OUT="$MODULE/bridges/lib"

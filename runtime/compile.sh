@@ -1,6 +1,11 @@
 #!/bin/sh
 # Shared compile helpers for the API 28 guest runtime.
 set -eu
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) HOST_TAG=windows-x86_64; EXE=.exe ;;
+    Darwin)               HOST_TAG=darwin-x86_64;  EXE= ;;
+    *)                    HOST_TAG=linux-x86_64;   EXE= ;;
+esac
 : "${MODULE:=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
 RT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(CDPATH= cd -- "$RT/../.." && pwd)
@@ -9,7 +14,7 @@ OUT="$RT/build"
 B="$UP/bionic/libc"
 NDK=${ANDROID_NDK_HOME:-"C:/Users/22437/AppData/Local/Android/Sdk/ndk/29.0.14206865"}
 if command -v cygpath >/dev/null 2>&1; then NDK=$(cygpath -u "$NDK"); fi
-export PATH="$NDK/toolchains/llvm/prebuilt/windows-x86_64/bin:$PATH"
+export PATH="$NDK/toolchains/llvm/prebuilt/$HOST_TAG/bin:$PATH"
 unset LD_LIBRARY_PATH LD_PRELOAD || true
 CLANG_RESOURCE_DIR=$(clang -print-resource-dir)
 

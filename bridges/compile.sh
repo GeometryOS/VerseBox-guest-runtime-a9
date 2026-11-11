@@ -2,6 +2,11 @@
 # Shared build environment for A9 (API 28) project bridge libraries.
 # Every bridge links the source-built API 28 libc/libdl/libm, never A10 objects.
 set -eu
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) HOST_TAG=windows-x86_64; EXE=.exe ;;
+    Darwin)               HOST_TAG=darwin-x86_64;  EXE= ;;
+    *)                    HOST_TAG=linux-x86_64;   EXE= ;;
+esac
 : "${MODULE:=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
 # Git Bash (MSYS2) rewrites POSIX-looking arguments into Windows paths before
 # handing them to native tools.  That turned "-dynamic-linker /system/bin/linker64"
@@ -16,9 +21,9 @@ UP="$RT/upstream"
 OUT="$MODULE/bridges"
 SYSROOT_NDK=${ANDROID_NDK_HOME:-"C:/Users/22437/AppData/Local/Android/Sdk/ndk/29.0.14206865"}
 if command -v cygpath >/dev/null 2>&1; then SYSROOT_NDK=$(cygpath -u "$SYSROOT_NDK"); fi
-export PATH="$SYSROOT_NDK/toolchains/llvm/prebuilt/windows-x86_64/bin:$PATH"
+export PATH="$SYSROOT_NDK/toolchains/llvm/prebuilt/$HOST_TAG/bin:$PATH"
 unset LD_LIBRARY_PATH LD_PRELOAD || true
-SYSROOT="$SYSROOT_NDK/toolchains/llvm/prebuilt/windows-x86_64/sysroot"
+SYSROOT="$SYSROOT_NDK/toolchains/llvm/prebuilt/$HOST_TAG/sysroot"
 API=28
 TARGET=aarch64-linux-android$API
 
