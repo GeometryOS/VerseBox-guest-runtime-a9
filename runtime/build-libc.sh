@@ -98,7 +98,15 @@ objects="$objects $object"
 # list instead of silently dropping inputs.
 # ld.lld is a native Windows binary: paths inside the response file must be
 # Windows-resolvable. Relative paths are enough because the build runs in ROOT.
-for object in $objects; do printf '%s\n' "${object#$ROOT/}"; done > "$OUT/obj/libc/objects.rsp"
+# Windows 的 ld.lld 不认带盘符/空格的绝对路径，所以那边必须写成相对 $ROOT 的形式；
+# Linux/macOS 的 ld.lld 按 **cwd** 解析相对路径，而 cwd 是 $MODULE（不是 $ROOT），
+# 于是 "VerseBox-guest-runtime-a9/runtime/build/..." 这种路径全部找不到。
+# 判据：路径只在有 cygpath 的环境里做前缀剥离，其余平台一律写绝对路径。
+if command -v cygpath >/dev/null 2>&1; then
+    for object in $objects; do printf '%s\n' "${object#$ROOT/}"; done > "$OUT/obj/libc/objects.rsp"
+else
+    for object in $objects; do printf '%s\n' "$object"; done > "$OUT/obj/libc/objects.rsp"
+fi
 ld.lld -shared -soname libc.so -z max-page-size=4096 -z now -z relro \
     --hash-style=gnu --eh-frame-hdr --build-id=sha1 --no-undefined --exclude-libs ALL \
     --version-script "$OUT/generated/libc.map" -Map "$OUT/libc.map" --error-limit=0 \
