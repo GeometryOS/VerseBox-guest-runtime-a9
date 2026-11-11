@@ -63,6 +63,12 @@ if ! exists bridges/lib/liba9vm-property-client.so; then
 fi
 
 if ! exists bridges/graphics/lib/libEGL_emulation.so; then
+    # 取源要在编译之前（干净 clone / CI 上 graphics/upstream 是空的）。
+    # 三个 fetch 都是幂等的：目录已有内容就直接返回。A15 的 build.sh 同一条顺序。
+    step "graphics sources (goldfish egl / rendercontrol / framework)"
+    [ -d graphics/upstream/goldfish ] || sh graphics/fetch-graphics.sh
+    [ -d graphics/upstream/rendercontrol ] || sh graphics/fetch-rendercontrol.sh
+    sh graphics/fetch-framework-a9.sh
     step "graphics compatibility layer"
     sh bridges/build-graphics-a9.sh
 fi
