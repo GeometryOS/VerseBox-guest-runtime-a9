@@ -43,6 +43,7 @@ compile() {
         -I"$UP/external/zlib" -I"$UP/external/zlib/src" \
         -I"$UP/external/libcxxabi/include" -I"$UP/external/jemalloc/include" \
         -I"$UP/system/core/property_service/libpropertyinfoparser/include" \
+ -I"$UP/system/core/debuggerd/handler/include" \
         -I"$MODULE/vendor/runtime/filesystem" \
         -fPIC -fno-stack-protector -fno-exceptions -fno-rtti -fno-sized-deallocation \
         -fno-emulated-tls -ffunction-sections -fdata-sections -mno-outline-atomics \

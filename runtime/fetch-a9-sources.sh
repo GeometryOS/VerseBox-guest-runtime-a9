@@ -47,6 +47,10 @@ fetch system/core libsystem/include system/core/libsystem/include
 fetch system/core include           system/core/include
 fetch system/core libziparchive     system/core/libziparchive
 fetch system/core property_service/libpropertyinfoparser system/core/property_service/libpropertyinfoparser
+# linker_main.cpp（AOSP 9）无条件 includes "debuggerd/handler.h"：头文件在
+# system/core/debuggerd/handler/include/debuggerd/handler.h。只取 handler 子目录，
+# 不把整个 system/core 拉下来。
+fetch system/core debuggerd/handler    system/core/debuggerd/handler
 fetch external/libcxx src           external/libcxx/src
 fetch external/libcxx include       external/libcxx/include
 fetch external/libcxxabi src        external/libcxxabi/src
