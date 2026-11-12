@@ -86,8 +86,10 @@ jobs:
       - name: Cache extracted rootfs
         uses: actions/cache@v4
         with:
-          path: rootfs
-          key: a9-rootfs-${{ runner.os }}-${{ hashFiles('scripts/extract-rootfs.py') }}
+          path: |
+            rootfs
+            rootfs-index.json
+          key: a9-rootfs-v2-${{ runner.os }}-${{ hashFiles('scripts/extract-rootfs.py') }}
 
       - name: Cache AOSP sources and native outputs
         uses: actions/cache@v4
