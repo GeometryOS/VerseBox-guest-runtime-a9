@@ -1,1 +1,41 @@
-[]
+[
+  {
+    "version": "v1.0.1",
+    "title": "VerseBox A9 v1.0.1",
+    "romVersion": "1.0.1",
+    "romKey": "android9@1.0.1",
+    "payloadSha256": "47eef01992c4bafd6bb8582651f4b505a5e62daa97bd610430186c7b317e0642",
+    "payloadBytes": 1197688957,
+    "payloadFiles": 2197,
+    "commit": "f1170d307ae28394bcecd49c6ee19af7024ec8f6",
+    "runUrl": "https://github.com/GeometryOS/VerseBox-guest-runtime-a9/actions/runs/44221540076",
+    "publishedAt": "2026-11-18T02:16:40.471Z",
+    "assets": [
+      {
+        "name": "a9-runtime-v1.0.1.tar.gz",
+        "bytes": 493161622,
+        "sha256": "b06e72442cc2da9fc6bd4caaf511b6aa27dd9b46d5e77e375141b227dc1264fd"
+      },
+      {
+        "name": "dist/apk-resident-libs-android9.tar",
+        "bytes": 860160,
+        "sha256": "e54e49355929d45e664b4e759b4ab81d1dd5f9e993de0b3be6b6ca74290f48af"
+      },
+      {
+        "name": "dist/pack-android9-1.0.1.json",
+        "bytes": 641,
+        "sha256": "07e936259fdb5eb941615e96282f6772754c38556c8bba3d3973eb3f967ac111"
+      },
+      {
+        "name": "dist/versebox-android9-1.0.1-min.zip",
+        "bytes": 704,
+        "sha256": "aba246fb312075c50e37401cd2d5cd80af331861a1ec05aebdb709ce98961547"
+      },
+      {
+        "name": "dist/versebox-android9-1.0.1.zip",
+        "bytes": 493413815,
+        "sha256": "2473e668c17cf7d73fad05b7b29c570005eabcd7700dac30eb4970bb8561fa80"
+      }
+    ]
+  }
+]
