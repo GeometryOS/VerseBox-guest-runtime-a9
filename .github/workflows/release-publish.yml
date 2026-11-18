@@ -1,0 +1,275 @@
+# Publishes one release, from the artifacts of that tag's own build.
+#
+# Two ways in: a green Build A9 runtime run for a vX.Y.Z tag starts this workflow by itself, and
+# a manual dispatch can publish a tag that already has a green run. Both paths take the artifacts
+# GitHub produced, run the gates below, generate the body from the repository and attach the
+# files. Nothing is packed on a developer machine.
+#
+# Gates, in order:
+#   1. the tag matches vX.Y.Z and exists;
+#   2. Build A9 runtime succeeded for that exact tag, not merely for the same commit;
+#   3. every downloaded file matches SHA256SUMS, so the bytes are the bytes the build verified;
+#   4. the ROM package passes rom/pack-rom.py --verify-only, which re-reads its own manifest.
+#
+# One more check sits inside the notes step: the package's romKey must match rom/rom.properties.yaml,
+# so the published file carries the version and the id the repository claims.
+#
+# The title is the product prefix followed by the tag. The body is built by
+# .github/scripts/generate-release-notes.mjs from the commits, the pack report and the asset list.
+# release/release.json keeps one entry per version, newest last, the last 100 versions kept.
+name: Release Publish
+
+on:
+  # The chain needs no token and no dispatch call: when the tag build finishes green, GitHub
+  # starts this run. A failed or non-tag build stops at the job condition below.
+  workflow_run:
+    workflows: ["Build A9 runtime"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish, shaped vX.Y.Z'
+        required: true
+        type: string
+      dry_run:
+        description: 'Run the gates and print the notes without publishing anything'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: a9-release-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    env:
+      # A tag build reports the tag as its branch, so both entry points end up with the same string.
+      TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+    steps:
+      - name: Checkout the tag with full history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 'Gate 1: the tag exists and matches vX.Y.Z'
+        env:
+          TAG: ${{ env.TAG }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "tag $TAG is not vX.Y.Z" >&2; exit 1; }
+          git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1 \
+            || { echo "tag $TAG does not exist in this repository" >&2; exit 1; }
+          echo "tag commit: $(git rev-list -n1 "refs/tags/$TAG")"
+
+      # A green run on the same commit is not enough: a branch build and a tag build of one
+      # commit differ in the tarball name, and the release has to carry the tag's own file.
+      - name: 'Gate 2: a successful build for this tag'
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ env.TAG }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-list -n1 "refs/tags/$TAG")
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/build.yml/runs?event=push&per_page=100" \
+            > "$RUNNER_TEMP/runs.json"
+          python3 - "$RUNNER_TEMP/runs.json" "$sha" "$TAG" "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          runs_path, sha, tag, out_path = sys.argv[1:5]
+          pages = json.load(open(runs_path, encoding='utf-8'))
+          runs = [run for page in pages for run in page.get('workflow_runs', [])]
+          same = [run for run in runs if run.get('head_sha') == sha]
+          for run in same:
+              print('  run %s  conclusion=%s  head_branch=%s' % (run['id'], run['conclusion'], run['head_branch']))
+          green = sorted((run for run in same
+                          if run.get('conclusion') == 'success' and run.get('head_branch') == tag),
+                         key=lambda run: run['id'], reverse=True)
+          if not green:
+              print('no successful Build A9 runtime run for tag %s at %s.' % (tag, sha), file=sys.stderr)
+              print('Push the tag and wait for that build to pass before publishing.', file=sys.stderr)
+              sys.exit(1)
+          with open(out_path, 'a', encoding='utf-8') as handle:
+              handle.write('run_id=%s\n' % green[0]['id'])
+              handle.write('run_url=%s\n' % green[0]['html_url'])
+              handle.write('commit=%s\n' % sha)
+          print('using %s' % green[0]['html_url'])
+          PY
+
+      - name: Download the artifacts of that build
+        uses: actions/download-artifact@v4
+        with:
+          name: a9-runtime
+          path: .
+          run-id: ${{ steps.build.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      # Every group below is a file the release has to carry. A missing group means the tag build
+      # did not reach that step, which is a reason to look at that build, not to publish without it.
+      - name: 'Gate 3: every file matches SHA256SUMS'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for pattern in 'a9-runtime-*.tar.gz' 'dist/versebox-*.zip' 'dist/*-min.zip' 'dist/pack-*.json' 'dist/apk-resident-libs-*.tar'; do
+            files=($pattern)
+            if [ ${#files[@]} -eq 0 ]; then
+              echo "the tagged build has no $pattern" >&2
+              exit 1
+            fi
+          done
+          ls -l dist/
+          sha256sum --check --strict SHA256SUMS
+
+      # The package is verified from its own manifest, so a corrupted or hand-edited zip cannot
+      # reach a release even if somebody regenerates SHA256SUMS around it.
+      - name: 'Gate 4: the ROM package verifies'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          full=()
+          for zip in dist/versebox-*.zip; do
+            case "$zip" in
+              *-min.zip) ;;
+              *) full+=("$zip") ;;
+            esac
+          done
+          if [ ${#full[@]} -ne 1 ]; then
+            echo "expected exactly one full ROM package, found ${#full[@]}" >&2
+            exit 1
+          fi
+          python3 rom/pack-rom.py --verify-only "${full[0]}"
+
+      # One glob per group, and no group overlaps another: dist/versebox-*.zip already covers the
+      # min placeholder, so naming it again is how one file ends up listed twice and the upload
+      # then fights itself. The release step takes its file list from this same JSON, so what is
+      # published and what is indexed cannot drift apart.
+      - name: Collect the assets
+        id: assets
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          node .github/scripts/collect-release-assets.mjs --out release-assets.json \
+            a9-runtime-*.tar.gz dist/versebox-*.zip \
+            dist/apk-resident-libs-*.tar dist/pack-*.json SHA256SUMS
+          cat release-assets.json
+          node -e "const a=require('./release-assets.json'); console.log(a.map(x => x.name).join('\\n'))" > release-file-list.txt
+          {
+            echo 'files<<A9_FILES'
+            cat release-file-list.txt
+            echo 'A9_FILES'
+          } >> "$GITHUB_OUTPUT"
+          cat release-file-list.txt
+
+      - name: Generate the release notes
+        id: notes
+        env:
+          TAG: ${{ env.TAG }}
+          RUN_URL: ${{ steps.build.outputs.run_url }}
+          COMMIT: ${{ steps.build.outputs.commit }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packs=(dist/pack-*.json)
+          node .github/scripts/generate-release-notes.mjs \
+            --tag "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --assets release-assets.json \
+            --rom-properties rom/rom.properties.yaml \
+            --pack-report "${packs[0]}" \
+            --commit "$COMMIT" \
+            --run-url "$RUN_URL" \
+            --notes CHANGELOG.md \
+            --title release-title.txt \
+            --version-out release-version.txt
+          echo "title=$(cat release-title.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Record the version in the index
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packs=(dist/pack-*.json)
+          node .github/scripts/update-release-index.mjs \
+            --file release/release.json \
+            --version "$(cat release-version.txt)" \
+            --title "$(cat release-title.txt)" \
+            --rom-properties rom/rom.properties.yaml \
+            --pack-report "${packs[0]}" \
+            --commit "${{ steps.build.outputs.commit }}" \
+            --run-url "${{ steps.build.outputs.run_url }}" \
+            --assets release-assets.json
+          cat release/release.json
+
+      - name: 'Dry run: print the notes and stop'
+        if: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          echo '--- title ---'
+          cat release-title.txt
+          echo '--- body ---'
+          cat CHANGELOG.md
+
+      - name: Publish the release
+        if: ${{ !inputs.dry_run }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ steps.notes.outputs.title }}
+          body_path: CHANGELOG.md
+          files: ${{ steps.assets.outputs.files }}
+          fail_on_unmatched_files: true
+          draft: false
+
+      # The index is committed after the release exists, so a reader never finds a version whose
+      # files are not published yet. Re-running this workflow repairs a half-finished publish,
+      # because the upsert replaces the entry instead of appending a second one.
+      - name: Commit the release index
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ env.TAG }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          branch=$(gh repo view "$GITHUB_REPOSITORY" --json defaultBranchRef -q .defaultBranchRef.name)
+          work=$(mktemp -d)
+          gh repo clone "$GITHUB_REPOSITORY" "$work/index" -- --depth=1 --branch "$branch"
+          mkdir -p "$work/index/release"
+          cp release/release.json "$work/index/release/release.json"
+          cd "$work/index"
+          if git diff --quiet -- release/release.json; then
+            echo 'release index already records this version'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add release/release.json
+          git commit -m "chore(release): record ${TAG}"
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:$branch"; then
+              echo "release index pushed to $branch"
+              exit 0
+            fi
+            git fetch origin "$branch"
+            git rebase "origin/$branch" || { echo 'index rebase conflict, resolve by hand' >&2; exit 1; }
+          done
+          echo 'could not push the release index after three attempts' >&2
+          exit 1

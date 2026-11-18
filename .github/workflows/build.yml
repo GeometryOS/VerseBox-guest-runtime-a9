@@ -1,16 +1,20 @@
-# Full build of the Android 9 runtime payload (prepared/) **and the new-format ROM package** for CI and releases.
+# Full build of the Android 9 runtime payload (prepared/) **and the new-format ROM package** for CI.
 #
 # This repository only handles the A9 guest runtime: image -> rootfs -> API 28 runtime ->
-# bridges -> prepared (assets + jniLibs + manifest) -> dist/versebox-android9-<ver>.zip
+# bridges/graphics -> prepared (assets + jniLibs + manifest) -> dist/versebox-android9-<ver>.zip
 # (+ -min.zip + apk-resident-libs-android9.tar). The APK belongs to the host project,
 # not built here: this repo has no app source, so scripts/build.sh stops after the ROM package.
 #
 # Artifacts: a9-runtime-<ref>.tar.gz (prepared) + versebox-*.zip + *-min.zip
 #            + apk-resident-libs-*.tar + pack-*.json + SHA256SUMS.
 #
+# This workflow only builds. Publishing is a separate action (release-publish.yml), which takes
+# the artifacts of a tag's build, runs its gates and creates the release, so pushing a tag never
+# publishes by itself.
+#
 # Triggers:
 #   * push any branch / PR -> Full build (incremental after cache)
-#   * push tag v*          -> Build and create GitHub Release
+#   * push tag v*          -> Build the payload that this tag will be published from
 #   * workflow_dispatch    -> Manual build
 name: Build A9 runtime
 
@@ -18,11 +22,16 @@ on:
   push:
     branches: ["**"]
     tags: ["v*"]
+    # release-publish.yml records each published version here; that commit changes no source.
+    paths-ignore:
+      - release/**
   pull_request:
   workflow_dispatch:
 
+# Building needs no write access: the release and the commit to release/release.json are done
+# by release-publish.yml, which asks for contents: write on its own.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: a9-${{ github.ref }}
@@ -36,7 +45,6 @@ jobs:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/29.0.14206865
-      A9_SKIP_APK: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,6 +71,9 @@ jobs:
           "${SDKMANAGER}" --sdk_root="${ANDROID_HOME}" --install \
             "platforms;android-28" "platforms;android-35" "build-tools;35.0.0" "ndk;29.0.14206865"
           test -x "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++"
+          # scripts/prepare-a9.py 把 d8 钉在 build-tools/35.0.0 下，缺了会在 prepare 阶段
+          # 才报找不到命令，那时前四层已经跑完了。
+          test -x "${ANDROID_HOME}/build-tools/35.0.0/d8"
 
       # runtime/build-static.sh 直接调用裸 `llvm-ar`（不写绝对路径），NDK 的 llvm binutils
       # 默认不在 PATH 里 —— 缺了就是 `llvm-ar: not found`（exit 127）。这里一次性补齐。
@@ -185,7 +196,8 @@ jobs:
           tar -czf "${name}.tar.gz" prepared
           sha256sum "${name}.tar.gz" > SHA256SUMS
           shopt -s nullglob
-          for f in dist/versebox-*.zip dist/*-min.zip dist/apk-resident-libs-*.tar dist/pack-*.json; do
+          # dist/versebox-*.zip 已经覆盖最小占位包，再列一次会让同一个文件在清单里出现两行。
+          for f in dist/versebox-*.zip dist/apk-resident-libs-*.tar dist/pack-*.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" >> SHA256SUMS
           done
@@ -203,15 +215,3 @@ jobs:
             dist/pack-*.json
             SHA256SUMS
           if-no-files-found: error
-
-      - name: Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            a9-runtime-*.tar.gz
-            dist/versebox-*.zip
-            dist/*-min.zip
-            dist/apk-resident-libs-*.tar
-            dist/pack-*.json
-            SHA256SUMS

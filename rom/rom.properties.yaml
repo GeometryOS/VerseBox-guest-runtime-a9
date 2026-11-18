@@ -18,8 +18,8 @@ schema: versebox-rom-properties/1
 id: android9
 name: Android 9
 androidVersion: "9"
-description: 独立 API 28 用户空间（Redroid 9 + AOSP 9 自建运行时）
-defaultRomVersion: 1.0.0
+description: AOSP9 虚拟机 ROM
+defaultRomVersion: 1.0.1
 
 # 客体 .so 的承载方式（docs/rom-package/04 §3.3）：
 #   apk  —— 客体 .so 仍由 APK 的 lib/arm64-v8a 提供，ROM 只带数据（旧行为）

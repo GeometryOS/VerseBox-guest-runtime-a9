@@ -1,7 +1,7 @@
 # 必须留在 APK `lib/arm64-v8a` 的原生文件（Android 9 的 "execve 集合"）
 #
-# 谁读它：guest-runtime-a15/rom/pack-rom.py（新格式，写 files[].resident）与
-#          guest-runtime-a15/rom/stage-apk-payload.py（旧格式，决定哪个 .so 留在 APK 的 lib/）。
+# 谁读它：rom/pack-rom.py（新格式，写 files[].resident）与
+#          rom/stage-apk-payload.py（旧格式，决定哪个 .so 留在 APK 的 lib/）。
 # 两者都按本文件判断，不许在别处再写一份名字列表。
 #
 # 平台事实（2026-11-11 真机实测，A15 同一条结论）：App 进程的 SELinux 域是
