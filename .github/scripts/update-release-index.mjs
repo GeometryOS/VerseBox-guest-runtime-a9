@@ -1,20 +1,23 @@
-// 把一次发布记进版本索引。
+// Records one published release in the index.
 //
-// 文件是一个 JSON 数组，一个版本一条记录，版本就是标签名，所以一个版本只能有一条。
-// 最新的记录排在最末尾，只保留最近一百个版本。
+// The file is a JSON array with one entry per version, and the version is the tag name, so a
+// version can only be published as one entry. The newest entry sits at the end and only the last
+// MAX_ENTRIES versions are kept.
 //
-// 覆盖而不是追加，是这个文件可信的原因。发布可能在某个步骤失败之后重跑，
-// 标签也可能被删掉、在新的提交上重新打回来；两种情形都会让同一个版本再写一次记录，
-// 只追加的话同一个版本就留下两条哈希不同的记录，按版本查的人无法说出哪一条是当前的。
+// Replacing instead of appending is what keeps the file trustworthy. A publish run can be
+// repeated after a failed step, and a tag can be deleted and recreated on a new commit; either
+// would leave two rows for one version with two different hashes, and a reader looking a version
+// up would have no way to say which row is current.
 //
-// 一条记录不符合格式就停下，因为版本被写成数字会让替换静默失效，之后每次都追加一条。
+// An entry that does not match the schema stops the run, because a numeric version would make
+// the replacement stop matching without any error.
 //
-// 用法：
-//   node update-release-index.mjs --file release/release.json --version <版本> \
-//     --title <标题> \
+// Usage:
+//   node update-release-index.mjs --file release/release.json --version <version> \
+//     --title <title> \
 //     --rom-properties rom/rom.properties.yaml \
-//     --pack-report <打包报告> --commit <提交> \
-//     --run-url <地址> --assets release-assets.json
+//     --pack-report <pack report> --commit <sha> \
+//     --run-url <url> --assets release-assets.json
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
@@ -46,34 +49,34 @@ const { values } = parseArgs({
 
 const REQUIRED = ['file', 'version', 'title', 'rom-properties', 'pack-report', 'commit', 'assets'];
 for (const name of REQUIRED) {
-  if (!values[name]) fail(`--${name} 是必填`);
+  if (!values[name]) fail(`--${name} is required`);
 }
 
 const version = values.version;
-if (!VERSION_PATTERN.test(version)) fail(`--version ${version} 不是 vX.Y.Z`);
+if (!VERSION_PATTERN.test(version)) fail(`--version ${version} is not vX.Y.Z`);
 
 const maxEntries = values['max-entries'] ? Number(values['max-entries']) : MAX_ENTRIES;
-if (!Number.isInteger(maxEntries) || maxEntries < 1) fail('--max-entries 必须是正整数');
+if (!Number.isInteger(maxEntries) || maxEntries < 1) fail('--max-entries must be a positive integer');
 
 const rom = readRomProperties(values['rom-properties']);
 const report = readPackReport(values['pack-report']);
 const romKey = ROM_KEY_PATTERN.exec(report.romKey);
-if (!romKey) fail(`${values['pack-report']}: romKey ${report.romKey} 不是 <id>@<版本>`);
+if (!romKey) fail(`${values['pack-report']}: romKey ${report.romKey} is not <id>@<version>`);
 if (romKey[1] !== rom.id || romKey[2] !== rom.defaultRomVersion) {
-  fail(`包 ${report.romKey} 与 ${values['rom-properties']}` +
-    `（${rom.id}@${rom.defaultRomVersion}）不一致`);
+  fail(`package ${report.romKey} does not match ${values['rom-properties']}` +
+    ` (${rom.id}@${rom.defaultRomVersion})`);
 }
 
 const allAssets = JSON.parse(readFileSync(values.assets, 'utf8'));
-if (!Array.isArray(allAssets) || allAssets.length === 0) fail(`${values.assets}: 期望一个非空数组`);
+if (!Array.isArray(allAssets) || allAssets.length === 0) fail(`${values.assets}: expected a non-empty array`);
 for (const asset of allAssets) {
-  if (typeof asset.name !== 'string' || !asset.name) fail(`${values.assets}: 有附件没有名字`);
-  if (!Number.isInteger(asset.bytes) || asset.bytes <= 0) fail(`${values.assets}: ${asset.name} 没有字节数`);
-  if (!SHA256_PATTERN.test(asset.sha256)) fail(`${values.assets}: ${asset.name} 没有 sha256`);
+  if (typeof asset.name !== 'string' || !asset.name) fail(`${values.assets}: an asset has no name`);
+  if (!Number.isInteger(asset.bytes) || asset.bytes <= 0) fail(`${values.assets}: ${asset.name} has no byte count`);
+  if (!SHA256_PATTERN.test(asset.sha256)) fail(`${values.assets}: ${asset.name} has no sha256`);
 }
 
-// 校验清单本身不进附件列表。给一份"哈希的清单"再算一个哈希只描述它自己，
-// 而每个读者本来就用它核对别的附件。
+// The checksum file itself is left out. A checksum of the list of checksums describes only
+// that file, and every reader compares the assets against it anyway.
 const assets = allAssets.filter(asset => asset.name !== 'SHA256SUMS');
 
 let entries = [];
@@ -82,11 +85,11 @@ try {
 } catch (error) {
   if (error.code !== 'ENOENT') throw error;
 }
-if (!Array.isArray(entries)) fail(`${values.file}: 期望一个 JSON 数组`);
+if (!Array.isArray(entries)) fail(`${values.file}: expected a JSON array`);
 entries.forEach((item, index) => {
   if (!item || typeof item !== 'object' || typeof item.version !== 'string'
     || !VERSION_PATTERN.test(item.version)) {
-    fail(`${values.file}: 第 ${index} 条没有 vX.Y.Z 形式的版本，请手改这个文件`);
+    fail(`${values.file}: entry ${index} has no version in vX.Y.Z form; fix the file by hand`);
   }
 });
 
@@ -95,9 +98,10 @@ const entry = {
   title: values.title,
   romVersion: romKey[2],
   romKey: report.romKey,
-  payloadSha256: report.payloadSha256,
-  payloadBytes: report.payloadBytes,
-  payloadFiles: report.payloadFiles,
+  versionPointer: report.versionPointer,
+  minAppVersionCode: report.minAppVersionCode,
+  packSeconds: report.packSeconds,
+  files: report.files,
   commit: values.commit,
   runUrl: values['run-url'] ?? null,
   publishedAt: new Date().toISOString(),
@@ -111,4 +115,4 @@ const updated = [
 ].slice(-maxEntries);
 
 writeFileSync(values.file, `${JSON.stringify(updated, null, 2)}\n`, 'utf8');
-console.log(`${values.file}: 替换 ${replaced} 条 ${version}，保留 ${updated.length} 条`);
+console.log(`${values.file}: ${replaced} entry for ${version} replaced, ${updated.length} entries kept`);

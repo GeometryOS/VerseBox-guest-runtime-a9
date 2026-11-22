@@ -89,7 +89,7 @@ MANIFEST=guest-runtime-a9-inputs.json
 PREFIX=guest-runtime-a9/
 ROM_ID=$(sed -n 's/^id:[[:space:]]*//p' rom/rom.properties.yaml | head -n 1)
 ROM_VERSION=${ROM_VERSION:-$(sed -n 's/^defaultRomVersion:[[:space:]]*//p' rom/rom.properties.yaml | head -n 1)}
-ROM_OUT=${ROM_OUT:-dist/versebox-$ROM_ID-$ROM_VERSION.zip}
+ROM_OUT=${ROM_OUT:-dist/$ROM_ID@$ROM_VERSION/versebox-$ROM_ID-$ROM_VERSION.zip}
 
 for tool in "$PACK_ROM" "$STAGE_PAYLOAD"; do
     if [ ! -f "$tool" ]; then

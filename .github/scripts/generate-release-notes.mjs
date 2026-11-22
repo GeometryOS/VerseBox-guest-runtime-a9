@@ -1,14 +1,15 @@
-// 为一个标签生成发布标题与正文。
+// Builds the release title and body for one tag.
 //
-// 标题是产品前缀接上标签，版本只出现一次，不再发明别的东西。正文由事实拼成，
-// 不写散文：上一个标签到这一个标签之间的提交、打包器给这个 ROM 包的自报、
-// 以及从下载下来的构建产物里收集到的附件清单。因此同一个标签发两次得到逐字相同的文字，
-// 一次发布可以只靠仓库复核。
+// The title is the product prefix followed by the tag, so the version appears once and nothing
+// else is invented. The body is assembled from facts, not prose: the commits between the
+// previous tag and this one, the packer's report for the ROM package, and the asset list
+// collected from the downloaded build. Publishing the same tag twice therefore produces the
+// same text, and a release can be audited from the repository alone.
 //
-// 用法：
-//   node generate-release-notes.mjs --tag <标签> --repo <owner/repo> \
+// Usage:
+//   node generate-release-notes.mjs --tag <tag> --repo <owner/repo> \
 //     --assets release-assets.json --rom-properties rom/rom.properties.yaml \
-//     --pack-report <打包报告> --commit <提交> --run-url <地址> \
+//     --pack-report <pack report> --commit <sha> --run-url <url> \
 //     --notes CHANGELOG.md --title release-title.txt --version-out release-version.txt
 
 import { execFileSync } from 'node:child_process';
@@ -29,12 +30,12 @@ function git (...args) {
 }
 
 function requireVersion (tag) {
-  if (!TAG_PATTERN.test(tag)) fail(`标签 ${tag} 不是 vX.Y.Z，发布标题就是由它拼的`);
+  if (!TAG_PATTERN.test(tag)) fail(`tag ${tag} is not vX.Y.Z; the release title is built from it`);
   return tag;
 }
 
-// 标签可能落在任何更早的标签都到不了的提交上，第一次发布就是这种状态。
-// 这不是错误：正文说明这一点，并且不写完整变更链接。
+// A tag may sit on a commit that no earlier tag reaches, which is the normal state of the very
+// first release. That is not an error: the body says so and leaves out the compare link.
 function previousTag (tag) {
   try {
     return git('describe', '--tags', '--abbrev=0', `${tag}^`) || null;
@@ -80,11 +81,11 @@ const { values } = parseArgs({
 const REQUIRED = ['tag', 'repo', 'assets', 'notes', 'title', 'version-out', 'rom-properties',
   'pack-report', 'commit'];
 for (const name of REQUIRED) {
-  if (!values[name]) fail(`--${name} 是必填`);
+  if (!values[name]) fail(`--${name} is required`);
 }
 
 if (git('rev-parse', '--is-shallow-repository') === 'true') {
-  fail('发布正文需要完整的历史与标签，检出时把 fetch-depth 设为 0');
+  fail('release notes need the complete history and tags; check out with fetch-depth 0');
 }
 
 const tag = values.tag;
@@ -94,16 +95,17 @@ const rom = readRomProperties(values['rom-properties']);
 const report = readPackReport(values['pack-report']);
 const assets = JSON.parse(readFileSync(values.assets, 'utf8'));
 
-// 打包报告是包内结构唯一的记录，rom.properties.yaml 是仓库对它唯一的说法。
-// 两者不一致时，发出去的文件会带一个别的文档都不承认的版本和 id，所以在这里停下。
+// The pack report is the only record of what is inside the package, and rom.properties.yaml is
+// the only record of what the repository calls it. When the two disagree the released file
+// would carry a version and an id that no other document claims, so publishing stops here.
 const romKey = ROM_KEY_PATTERN.exec(report.romKey);
-if (!romKey) fail(`${values['pack-report']}: romKey ${report.romKey} 不是 <id>@<版本>`);
+if (!romKey) fail(`${values['pack-report']}: romKey ${report.romKey} is not <id>@<version>`);
 if (romKey[1] !== rom.id) {
-  fail(`包内 id ${romKey[1]} 与 ${values['rom-properties']} 的 id ${rom.id} 不一致`);
+  fail(`package id ${romKey[1]} does not match ${values['rom-properties']} id ${rom.id}`);
 }
 if (romKey[2] !== rom.defaultRomVersion) {
-  fail(`包内版本 ${romKey[2]} 与 ${values['rom-properties']} 的 defaultRomVersion` +
-    ` ${rom.defaultRomVersion} 不一致；发布前先重建这个标签`);
+  fail(`package version ${romKey[2]} does not match ${values['rom-properties']}` +
+    ` defaultRomVersion ${rom.defaultRomVersion}; rebuild this tag before publishing it`);
 }
 
 const previous = previousTag(tag);
@@ -120,16 +122,16 @@ const lines = [
   `| ROM id | \`${romKey[1]}\` |`,
   `| 客体 | ${rom.name ?? rom.id} |`,
   `| Android 版本 | ${rom.androidVersion ?? '?'} |`,
-  `| payloadSha256 | \`${report.payloadSha256}\` |`,
-  `| payloadBytes | ${formatSize(report.payloadBytes)} |`,
-  `| payload 文件数 | ${report.payloadFiles} |`,
+  `| 版本指针 | \`${report.versionPointer}\` |`,
+  `| 最低 app versionCode | ${report.minAppVersionCode} |`,
+  `| 发布文件清单 | ${report.files.length} 个文件 |`,
   `| 构建提交 | [\`${values.commit.slice(0, 8)}\`](${repositoryUrl}/commit/${values.commit}) |`,
 ];
 if (values['run-url']) lines.push(`| 构建记录 | [actions run](${values['run-url']}) |`);
 
 lines.push('', '## 更新', '');
 if (changes === null) {
-  lines.push('这是第一个标签，没有可比较的上一个版本。');
+  lines.push('这是第一个 tag，没有可比较的上一个版本。');
 } else if (changes.length === 0) {
   lines.push('此标签范围内没有新增提交。');
 } else {
@@ -152,4 +154,4 @@ writeFileSync(values.title, `${title}\n`, 'utf8');
 writeFileSync(values['version-out'], `${version}\n`, 'utf8');
 console.log(`version: ${version}`);
 console.log(`title: ${title}`);
-console.log(`range: ${previous ?? '(首个标签)'}..${tag}, ${changes === null ? 0 : changes.length} commits`);
+console.log(`range: ${previous ?? '(first tag)'}..${tag}, ${changes === null ? 0 : changes.length} commits`);

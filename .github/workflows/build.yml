@@ -148,7 +148,7 @@ jobs:
           shopt -s nullglob
           full=()
           minimal=()
-          for zip in dist/versebox-*.zip; do
+          for zip in dist/*/versebox-*.zip; do
             case "$zip" in
               *-min.zip) minimal+=("$zip") ;;
               *) full+=("$zip") ;;
@@ -178,7 +178,7 @@ jobs:
           print("minimal ok:", path)
           PY
           done
-          tars=(dist/apk-resident-libs-*.tar)
+          tars=(dist/*/apk-resident-libs-*.tar)
           if [ ${#tars[@]} -eq 0 ]; then
             echo "missing apk-resident-libs-*.tar (APK 的 lib/ 没有来源，装出来的包开不了机)" >&2
             exit 1
@@ -196,8 +196,8 @@ jobs:
           tar -czf "${name}.tar.gz" prepared
           sha256sum "${name}.tar.gz" > SHA256SUMS
           shopt -s nullglob
-          # dist/versebox-*.zip 已经覆盖最小占位包，再列一次会让同一个文件在清单里出现两行。
-          for f in dist/versebox-*.zip dist/apk-resident-libs-*.tar dist/pack-*.json; do
+          # dist/*/versebox-*.zip 已经覆盖最小占位包，再列一次会让同一个文件在清单里出现两行。
+          for f in dist/*/versebox-*.zip dist/*/apk-resident-libs-*.tar dist/*/pack-audit-intent.json; do
             [ -f "$f" ] || continue
             sha256sum "$f" >> SHA256SUMS
           done
@@ -209,9 +209,9 @@ jobs:
           name: a9-runtime
           path: |
             a9-runtime-*.tar.gz
-            dist/versebox-*.zip
-            dist/*-min.zip
-            dist/apk-resident-libs-*.tar
-            dist/pack-*.json
+            dist/*/versebox-*.zip
+            dist/*/versebox-*-min.zip
+            dist/*/apk-resident-libs-*.tar
+            dist/*/pack-audit-intent.json
             SHA256SUMS
           if-no-files-found: error

@@ -1,0 +1,57 @@
+name: ROM version gate
+
+on:
+  push:
+    paths:
+      - "rom/**"
+      - "scripts/**"
+      - ".github/workflows/rom-version-gate.yml"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rom-version-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 测试审计清单结构与 maxcv 选择
+        run: |
+          set -euo pipefail
+          echo "== 审计清单结构 / maxcv 选择 =="
+          python3 -m unittest -v rom.test_apk_artifacts rom.test_version_gate
+
+      - name: 校验 rom.properties.yaml 的兼容性声明
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import sys
+          values = {}
+          for raw in open("rom/rom.properties.yaml", encoding="utf-8"):
+              line = raw.split("#", 1)[0].strip()
+              if ":" not in line:
+                  continue
+              key, value = line.split(":", 1)
+              values[key.strip()] = value.strip().strip('"').strip("'")
+          if "versionPointer" in values:
+              sys.exit("rom.properties.yaml 不得声明 versionPointer：maxcv 属于 app 侧策略")
+          floor = values.get("minAppVersionCode", "")
+          if not floor.isdigit() or int(floor) <= 0:
+              sys.exit("rom.properties.yaml 的 minAppVersionCode 必须是正整数，当前为 %r" % floor)
+          print("兼容性声明有效：id=%s defaultRomVersion=%s minAppVersionCode=%s"
+                % (values.get("id"), values.get("defaultRomVersion"), floor))
+          PY
+
+      - name: 若已打包则校验真实 dist
+        run: |
+          set -euo pipefail
+          python3 rom/version_gate.py --check-dist dist

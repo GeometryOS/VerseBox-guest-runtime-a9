@@ -3,11 +3,12 @@
 # Copyright (C) 2026 VerseBox contributors
 """APK 侧产物（**每个运行时仓库各一份**，`docs/rom-release/01-入库配置/02-构建链产物.md`）。
 
-一次 ROM 打包除了完整的 ROM zip 之外，还要产出两样**给 APK 用**的东西：
+一次 ROM 打包会生成完整 ROM ZIP、两样给 APK 用的产物，以及供 app 校验的自动审计意图：
 
     <base>-min.zip                最小占位包：根目录只有 versebox_properties.yaml
                                   （payloadBytes: 0 / placeholder: true）
-    apk-resident-libs-<id>.tar    APK lib/ 必须带的原生文件（被 execve 的那几个）
+    apk-resident-libs-<id>-<ver>.tar  APK lib/ 必须带的原生文件（被 execve 的那几个）
+    pack-audit-intent.json           版本指针、最低 app 版本及逐文件 bytes/SHA-256
 
 为什么是这两个（不是"顺手多打两个文件"）：
 
@@ -32,7 +33,10 @@ zip 里的自述与清单就是事实，多一条来源就多一个能漂移的�
 
 import argparse
 import io
+from rom_hash import file_sha256
 import json
+import re
+import time
 import os
 import sys
 import tarfile
@@ -40,6 +44,14 @@ import zipfile
 
 PROPERTIES = "versebox_properties.yaml"
 DEFAULT_INPUTS = "versebox_inputs.json"
+
+
+def _file_record(path):
+    return {
+        "name": os.path.basename(path),
+        "bytes": os.path.getsize(path),
+        "sha256": file_sha256(path),
+    }
 
 
 def _read_zip_text(archive, name):
@@ -148,8 +160,9 @@ def write_resident_tar(entries, target):
     return target
 
 
-def build_apk_artifacts(zip_path, out_dir=None, resident_path=None, log=print):
-    """产出 min zip + resident tar；返回结果字典（给 pack 报告用）。"""
+def build_apk_artifacts(zip_path, out_dir=None, resident_path=None, log=print, pack_seconds=None):
+    """产出占位包、resident tar 与自动审计意图。"""
+    started = time.time()
     zip_path = os.path.abspath(zip_path)
     out_dir = os.path.abspath(out_dir or os.path.dirname(zip_path) or ".")
     base = os.path.splitext(os.path.basename(zip_path))[0]
@@ -165,24 +178,42 @@ def build_apk_artifacts(zip_path, out_dir=None, resident_path=None, log=print):
         values[key.strip()] = value.strip().strip('"').strip("'")
     rom_id = values.get("id") or "rom"
     rom_version = values.get("romVersion") or "0"
+    min_app_code = int(values.get("minAppVersionCode") or 0)
+    if min_app_code <= 0:
+        raise RuntimeError("minAppVersionCode 必须是正整数")
 
     minimal = write_minimal_zip(zip_path, os.path.join(out_dir, base + "-min.zip"))
 
     resident_names = read_resident(resident_path or os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "resident-native.txt"))
     entries = collect_resident(zip_path, resident_names)
-    tar_path = os.path.join(out_dir, "apk-resident-libs-%s.tar" % rom_id)
+    tar_path = os.path.join(out_dir, "apk-resident-libs-%s-%s.tar" % (rom_id, rom_version))
     if entries:
         write_resident_tar(entries, tar_path)
     else:
-        log("apk-artifacts: %s 没有 resident 文件（resident-native.txt 为空或清单没有 libPath）" % rom_id)
-        tar_path = None
+        raise RuntimeError("resident-native.txt 没有匹配到可供 APK 启动的文件")
 
+    files = [_file_record(zip_path), _file_record(minimal)]
+    if tar_path:
+        files.append(_file_record(tar_path))
+    audit_path = os.path.join(out_dir, "pack-audit-intent.json")
+    audit = {
+        "schema": "versebox-rom-pack-audit-intent/1",
+        "romKey": "%s@%s" % (rom_id, rom_version),
+        "minAppVersionCode": min_app_code,
+        "packSeconds": round(pack_seconds if pack_seconds is not None else time.time() - started, 1),
+        "files": files,
+    }
+    with open(audit_path, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(audit, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
     result = {
         "minimal": minimal,
         "minimalBytes": os.path.getsize(minimal),
         "residentTar": tar_path,
         "residentLibs": [name for name, _ in entries],
+        "auditIntent": audit_path,
+        "files": files,
     }
     log("apk-artifacts: %s@%s -> %s；resident %d 个%s" % (
         rom_id,
@@ -194,7 +225,7 @@ def build_apk_artifacts(zip_path, out_dir=None, resident_path=None, log=print):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="产出 APK 侧两件产物（最小包 + resident tar）")
+    parser = argparse.ArgumentParser(description="产出APK占位包、resident tar和自动审计意图")
     parser.add_argument("--zip", required=True, help="已经打好的完整 ROM zip")
     parser.add_argument("--out", default=None, help="产物目录（默认与 zip 同目录）")
     parser.add_argument("--resident", default=None, help="resident-native.txt 路径")

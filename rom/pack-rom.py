@@ -122,7 +122,7 @@ def read_properties(path):
 PROPERTY_ORDER = (
     "schema", "id", "romVersion", "name", "androidVersion", "apiLevel", "description",
     "inputs", "payloadRoot", "payloadBytes", "payloadSha256", "libMode",
-    "packedBy", "packedAt",
+    "minAppVersionCode", "packedBy", "packedAt",
 )
 
 
@@ -383,6 +383,12 @@ def pack(args):
 
         rom_version = (args.rom_version or properties.get("romVersion")
                        or properties.get("defaultRomVersion") or "1.0.0")
+        try:
+            min_app_version_code = int(properties.get("minAppVersionCode") or 0)
+        except ValueError:
+            min_app_version_code = 0
+        if min_app_version_code < 1:
+            raise PackError("rom.properties.yaml 的 minAppVersionCode 必须是正整数")
         write_properties(os.path.join(stage, "versebox_properties.yaml"), {
             "schema": ROM_SCHEMA,
             "id": rom_id,
@@ -396,13 +402,15 @@ def pack(args):
             "payloadBytes": payload_bytes,
             "payloadSha256": payload_hash,
             "libMode": lib_mode,
+            "minAppVersionCode": min_app_version_code,
             "packedBy": "rom/pack-rom.py@%s" % (args.git_rev or "rev-unknown"),
             "packedAt": datetime.datetime.now(datetime.timezone.utc)
                                   .strftime("%Y-%m-%dT%H:%M:%SZ"),
         })
 
+        version_dir = os.path.join(DEFAULT_DIST, "%s@%s" % (rom_id, rom_version))
         out = os.path.abspath(args.out or os.path.join(
-            DEFAULT_DIST, "versebox-%s-%s.zip" % (rom_id, rom_version)))
+            version_dir, "versebox-%s-%s.zip" % (rom_id, rom_version)))
         os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
         started = time.time()
         write_zip(stage, out)
@@ -432,17 +440,14 @@ def pack(args):
         #   -min.zip   最小占位包（只声明"支持这个系统"）
         #   apk-resident-libs-<id>.tar   APK lib/ 必须带的原生文件
         # 两者都从这份 zip 反推，失败就让整次打包失败——不能产出"能装不能开机"的组合。
-        apk_artifacts = build_apk_artifacts(out, os.path.dirname(out))
+        apk_artifacts = build_apk_artifacts(out, os.path.dirname(out),
+                                            pack_seconds=round(took, 1))
         report["minimalZip"] = os.path.basename(apk_artifacts["minimal"])
         report["minimalBytes"] = apk_artifacts["minimalBytes"]
         report["residentTar"] = (os.path.basename(apk_artifacts["residentTar"])
                                  if apk_artifacts["residentTar"] else None)
         report["residentLibs"] = apk_artifacts["residentLibs"]
 
-        report_path = os.path.join(os.path.dirname(out),
-                                   "pack-%s-%s.json" % (rom_id, rom_version))
-        with open(report_path, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(report, handle, ensure_ascii=False, indent=2)
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     finally:

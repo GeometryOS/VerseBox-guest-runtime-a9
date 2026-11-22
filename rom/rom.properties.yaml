@@ -20,6 +20,8 @@ name: Android 9
 androidVersion: "9"
 description: AOSP9 虚拟机 ROM
 defaultRomVersion: 1.0.1
+minAppVersionCode: 105
+# minAppVersionCode 是这一版要求的最低 app versionCode；maxcv 是 app 侧策略。
 
 # 客体 .so 的承载方式（docs/rom-package/04 §3.3）：
 #   apk  —— 客体 .so 仍由 APK 的 lib/arm64-v8a 提供，ROM 只带数据（旧行为）

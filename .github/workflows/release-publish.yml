@@ -129,7 +129,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          for pattern in 'a9-runtime-*.tar.gz' 'dist/versebox-*.zip' 'dist/*-min.zip' 'dist/pack-*.json' 'dist/apk-resident-libs-*.tar'; do
+          for pattern in 'a9-runtime-*.tar.gz' 'dist/*/versebox-*.zip' 'dist/*/versebox-*-min.zip' 'dist/*/pack-audit-intent.json' 'dist/*/apk-resident-libs-*.tar'; do
             files=($pattern)
             if [ ${#files[@]} -eq 0 ]; then
               echo "the tagged build has no $pattern" >&2
@@ -146,7 +146,7 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           full=()
-          for zip in dist/versebox-*.zip; do
+          for zip in dist/*/versebox-*.zip; do
             case "$zip" in
               *-min.zip) ;;
               *) full+=("$zip") ;;
@@ -158,7 +158,7 @@ jobs:
           fi
           python3 rom/pack-rom.py --verify-only "${full[0]}"
 
-      # One glob per group, and no group overlaps another: dist/versebox-*.zip already covers the
+      # One glob per group, and no group overlaps another: dist/*/versebox-*.zip already covers the
       # min placeholder, so naming it again is how one file ends up listed twice and the upload
       # then fights itself. The release step takes its file list from this same JSON, so what is
       # published and what is indexed cannot drift apart.
@@ -168,8 +168,8 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           node .github/scripts/collect-release-assets.mjs --out release-assets.json \
-            a9-runtime-*.tar.gz dist/versebox-*.zip \
-            dist/apk-resident-libs-*.tar dist/pack-*.json SHA256SUMS
+            a9-runtime-*.tar.gz dist/*/versebox-*.zip \
+            dist/*/apk-resident-libs-*.tar dist/*/pack-audit-intent.json SHA256SUMS
           cat release-assets.json
           node -e "const a=require('./release-assets.json'); console.log(a.map(x => x.name).join('\\n'))" > release-file-list.txt
           {
@@ -188,7 +188,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          packs=(dist/pack-*.json)
+          packs=(dist/*/pack-audit-intent.json)
           node .github/scripts/generate-release-notes.mjs \
             --tag "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
@@ -206,7 +206,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          packs=(dist/pack-*.json)
+          packs=(dist/*/pack-audit-intent.json)
           node .github/scripts/update-release-index.mjs \
             --file release/release.json \
             --version "$(cat release-version.txt)" \
