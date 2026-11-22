@@ -98,7 +98,6 @@ const entry = {
   title: values.title,
   romVersion: romKey[2],
   romKey: report.romKey,
-  versionPointer: report.versionPointer,
   minAppVersionCode: report.minAppVersionCode,
   packSeconds: report.packSeconds,
   files: report.files,

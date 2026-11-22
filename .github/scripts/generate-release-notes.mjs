@@ -122,7 +122,6 @@ const lines = [
   `| ROM id | \`${romKey[1]}\` |`,
   `| 客体 | ${rom.name ?? rom.id} |`,
   `| Android 版本 | ${rom.androidVersion ?? '?'} |`,
-  `| 版本指针 | \`${report.versionPointer}\` |`,
   `| 最低 app versionCode | ${report.minAppVersionCode} |`,
   `| 发布文件清单 | ${report.files.length} 个文件 |`,
   `| 构建提交 | [\`${values.commit.slice(0, 8)}\`](${repositoryUrl}/commit/${values.commit}) |`,

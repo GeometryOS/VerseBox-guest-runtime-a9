@@ -38,7 +38,7 @@ export function readRomVersion(filePath) {
   return version;
 }
 
-const REPORT_FIELDS = ['romKey', 'versionPointer', 'minAppVersionCode', 'packSeconds', 'files'];
+const REPORT_FIELDS = ['romKey', 'minAppVersionCode', 'packSeconds', 'files'];
 
 export function readPackReport(filePath) {
   const report = JSON.parse(readFileSync(filePath, 'utf8'));
@@ -48,8 +48,8 @@ export function readPackReport(filePath) {
   if (!Number.isInteger(report.minAppVersionCode) || report.minAppVersionCode < 1) {
     throw new Error(`${filePath}: minAppVersionCode must be a positive integer`);
   }
-  if (report.versionPointer !== 'maxcv' && !/^\d+\.\d+\.\d+$/.test(report.versionPointer)) {
-    throw new Error(`${filePath}: versionPointer must be maxcv or MAJOR.MINOR.PATCH`);
+  if ('versionPointer' in report) {
+    throw new Error(filePath + ": 审计清单不得声明 versionPointer（maxcv 属于 app 侧策略）");
   }
   if (!Array.isArray(report.files) || report.files.length < 2) {
     throw new Error(`${filePath}: files must list ROM zip and placeholder zip`);
