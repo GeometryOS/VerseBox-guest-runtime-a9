@@ -4,37 +4,53 @@
     "title": "VerseBox A9 v1.0.1",
     "romVersion": "1.0.1",
     "romKey": "android9@1.0.1",
-    "payloadSha256": "47eef01992c4bafd6bb8582651f4b505a5e62daa97bd610430186c7b317e0642",
-    "payloadBytes": 1197688957,
-    "payloadFiles": 2197,
-    "commit": "f1170d307ae28394bcecd49c6ee19af7024ec8f6",
-    "runUrl": "https://github.com/GeometryOS/VerseBox-guest-runtime-a9/actions/runs/44221540076",
-    "publishedAt": "2026-11-18T02:16:40.471Z",
+    "minAppVersionCode": 105,
+    "packSeconds": 34.6,
+    "files": [
+      {
+        "name": "versebox-android9-1.0.1.zip",
+        "bytes": 493413828,
+        "sha256": "d21bac297bffc68161aba0ad69aac85c75e642fa1a481fd34987f864782dacf4"
+      },
+      {
+        "name": "versebox-android9-1.0.1-min.zip",
+        "bytes": 719,
+        "sha256": "f6578421d233f237e97b4f41e15827175a88d79e312d62cb318a299757a69b4e"
+      },
+      {
+        "name": "apk-resident-libs-android9-1.0.1.tar",
+        "bytes": 860160,
+        "sha256": "e54e49355929d45e664b4e759b4ab81d1dd5f9e993de0b3be6b6ca74290f48af"
+      }
+    ],
+    "commit": "3c2008c2bd7e00e3569862f44927b63105cbd9df",
+    "runUrl": "https://github.com/GeometryOS/VerseBox-guest-runtime-a9/actions/runs/45032901046",
+    "publishedAt": "2026-11-22T14:30:55.412Z",
     "assets": [
       {
         "name": "a9-runtime-v1.0.1.tar.gz",
-        "bytes": 493161622,
-        "sha256": "b06e72442cc2da9fc6bd4caaf511b6aa27dd9b46d5e77e375141b227dc1264fd"
+        "bytes": 493158373,
+        "sha256": "1f34241e9b3f56a89d84c9cababa89481e7119f4bb0d64b133a1308083773a99"
       },
       {
-        "name": "dist/apk-resident-libs-android9.tar",
+        "name": "dist/android9@1.0.1/apk-resident-libs-android9-1.0.1.tar",
         "bytes": 860160,
         "sha256": "e54e49355929d45e664b4e759b4ab81d1dd5f9e993de0b3be6b6ca74290f48af"
       },
       {
-        "name": "dist/pack-android9-1.0.1.json",
-        "bytes": 641,
-        "sha256": "07e936259fdb5eb941615e96282f6772754c38556c8bba3d3973eb3f967ac111"
+        "name": "dist/android9@1.0.1/pack-audit-intent.json",
+        "bytes": 654,
+        "sha256": "c55992cd9eb81d0ced626263c385ef86d75acd11ef8e90986aa9dae25059e96e"
       },
       {
-        "name": "dist/versebox-android9-1.0.1-min.zip",
-        "bytes": 704,
-        "sha256": "aba246fb312075c50e37401cd2d5cd80af331861a1ec05aebdb709ce98961547"
+        "name": "dist/android9@1.0.1/versebox-android9-1.0.1-min.zip",
+        "bytes": 719,
+        "sha256": "f6578421d233f237e97b4f41e15827175a88d79e312d62cb318a299757a69b4e"
       },
       {
-        "name": "dist/versebox-android9-1.0.1.zip",
-        "bytes": 493413815,
-        "sha256": "2473e668c17cf7d73fad05b7b29c570005eabcd7700dac30eb4970bb8561fa80"
+        "name": "dist/android9@1.0.1/versebox-android9-1.0.1.zip",
+        "bytes": 493413828,
+        "sha256": "d21bac297bffc68161aba0ad69aac85c75e642fa1a481fd34987f864782dacf4"
       }
     ]
   }
