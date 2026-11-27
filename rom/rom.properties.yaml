@@ -19,7 +19,7 @@ id: android9
 name: Android 9
 androidVersion: "9"
 description: AOSP9 虚拟机 ROM
-defaultRomVersion: 1.0.1
+defaultRomVersion: 1.0.2
 minAppVersionCode: 105
 # minAppVersionCode 是这一版要求的最低 app versionCode；maxcv 是 app 侧策略。
 
