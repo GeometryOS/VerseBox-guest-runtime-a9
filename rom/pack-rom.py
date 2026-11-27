@@ -149,6 +149,25 @@ def normalize_prefix(prefix):
     return prefix if prefix.endswith("/") else prefix + "/"
 
 
+def preload_problems(manifest):
+    files = manifest.get("files", [])
+    if not isinstance(files, list) or any(not isinstance(item, dict) for item in files):
+        return ["files 必须是对象列表"]
+    preloads = manifest.get("extraPreloads", [])
+    if not isinstance(preloads, list) or any(not isinstance(name, str) or not name for name in preloads):
+        return ["extraPreloads 必须是非空逻辑名的列表"]
+    logicals = {item.get("logical") for item in files}
+    problems = ["extraPreloads 引用了未声明的 files[].logical：%s" % name
+                for name in preloads if name not in logicals]
+    profile = manifest.get("runtimeProfile") or {}
+    if not isinstance(profile, dict):
+        return problems + ["runtimeProfile 必须是对象"]
+    if profile.get("installer") is True and profile.get("dexoptShim") is True:
+        if "liba9vm-dexopt-shim.so" not in logicals:
+            problems.append("runtimeProfile.dexoptShim 缺少 files[].logical：liba9vm-dexopt-shim.so")
+    return problems
+
+
 def rewrite_manifest(manifest, prefix, lib_mode):
     """只做两类改写（docs/rom-package/03 §1.1）；其余键值逐字不动。"""
     data = manifest.get("data")
@@ -169,6 +188,9 @@ def rewrite_manifest(manifest, prefix, lib_mode):
     files = manifest.get("files")
     if not isinstance(files, list):
         raise PackError("清单缺少 files[]")
+    problems = preload_problems(manifest)
+    if problems:
+        raise PackError("\n".join(problems))
     resident = read_resident()
     rewritten_files = []
     for item in files:
@@ -535,6 +557,7 @@ def verify_zip(path):
             if int(manifest.get("guestSdk") or -1) != api_level:
                 problems.append("清单 guestSdk=%s 与 apiLevel=%s 不一致"
                                 % (manifest.get("guestSdk"), api_level))
+            problems.extend(preload_problems(manifest))
             nameset = set(names)
             for index, item in enumerate(manifest.get("data") or []):
                 name = item.get("name") or ""

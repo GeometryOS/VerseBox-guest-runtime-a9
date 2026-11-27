@@ -62,6 +62,21 @@ if ! exists bridges/lib/liba9vm-property-client.so; then
     sh bridges/build-guest-log.sh
 fi
 
+if [ ! -s bridges/lib/liba9vm-healthd-sysfs.so ] ||
+   [ bridges/healthd-sysfs.c -nt bridges/lib/liba9vm-healthd-sysfs.so ] ||
+   [ bridges/build-healthd-sysfs.sh -nt bridges/lib/liba9vm-healthd-sysfs.so ]; then
+    step "healthd sysfs bridge"
+    sh bridges/build-healthd-sysfs.sh
+fi
+
+if [ ! -s bridges/lib/liba9vm-dexopt-shim.so ] ||
+   [ bridges/dexopt-shim.c -nt bridges/lib/liba9vm-dexopt-shim.so ] ||
+   [ bridges/build-dexopt-shim.sh -nt bridges/lib/liba9vm-dexopt-shim.so ] ||
+   [ runtime/build/lib/libc.so -nt bridges/lib/liba9vm-dexopt-shim.so ]; then
+    step "installer dexopt shim"
+    sh bridges/build-dexopt-shim.sh
+fi
+
 if ! exists bridges/graphics/lib/libEGL_emulation.so; then
     # 取源要在编译之前（干净 clone / CI 上 graphics/upstream 是空的）。
     # 三个 fetch 都是幂等的：目录已有内容就直接返回。A15 的 build.sh 同一条顺序。

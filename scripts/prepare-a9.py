@@ -72,6 +72,10 @@ GRAPHICS_GUEST_PATHS = {
     "hwcomposer.ranchu.so": "/vendor/lib64/hw/hwcomposer.ranchu.so",
 }
 
+# Preload names are resolved against the staged native manifest at boot.
+EXTRA_PRELOADS = ["liba9vm-healthd-sysfs.so"]
+INSTALLER_DEXOPT_PRELOAD = "liba9vm-dexopt-shim.so"
+
 # Project bridges rebuilt against the API 28 runtime.
 BRIDGE_FILES = [
     ("liba9vm-property-client.so", A9_BRIDGES / "lib" / "liba9vm-property-client.so",
@@ -288,6 +292,9 @@ def main():
         add_native(path, logical, name, "redroid9", library)
     missing = []
     for logical, path, name, library, guest_path in BRIDGE_FILES:
+        if (logical in EXTRA_PRELOADS or logical == INSTALLER_DEXOPT_PRELOAD) and (
+                not path.is_file() or path.stat().st_size == 0):
+            raise SystemExit("Missing required A9 preload build output: %s" % path)
         if not path.is_file():
             missing.append(logical)
             continue
@@ -648,7 +655,7 @@ def main():
         # FrameworkSession preloads these into every guest process through the
         # top-level manifest field.  It must stay at the top level: the old
         # runtimeProfile copy was never read, so healthd never saw the shim.
-        "extraPreloads": ["liba9vm-healthd-sysfs.so"],
+        "extraPreloads": EXTRA_PRELOADS,
         "runtimeProfile": profile,
         "symlinks": symlinks,
         "links": links,

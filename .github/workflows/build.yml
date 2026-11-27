@@ -115,6 +115,9 @@ jobs:
           key: a9-native-${{ runner.os }}-${{ hashFiles('runtime/*.sh', 'runtime/*.py', 'runtime/fetch-a9-sources.sh', 'bridges/**', 'vendor/**') }}
 
       # Order: image -> rootfs -> runtime -> bridges -> prepared -> ROM package -> (APK only if app exists).
+      - name: Test ROM packaging contract
+        run: python3 -m unittest rom.test_apk_artifacts rom.test_version_gate
+
       - name: Build (image -> rootfs -> runtime -> bridges -> prepared -> ROM)
         run: sh scripts/build.sh
 
@@ -128,6 +131,12 @@ jobs:
           assert m["guestSdk"] == 28 and m["frameworkSdk"] == 28, "wrong SDK in manifest"
           files = m["files"]
           assert len(files) > 100, "too few native files: %d" % len(files)
+          by_logical = {entry.get("logical"): entry for entry in files}
+          preloads = m.get("extraPreloads", [])
+          assert preloads and all(name in by_logical for name in preloads), "unresolved extraPreloads: %r" % preloads
+          profile = m.get("runtimeProfile", {})
+          if profile.get("installer") and profile.get("dexoptShim"):
+              assert "liba9vm-dexopt-shim.so" in by_logical, "missing installer dexopt shim"
           for entry in files:
               is_resident = entry.get("resident") is True
               lib_path = entry.get("libPath")
@@ -137,7 +146,7 @@ jobs:
                   path = pathlib.Path("prepared") / "assets" / lib_path
               assert path.is_file(), "missing " + str(path)
               assert path.stat().st_size == entry["bytes"], "size mismatch: " + str(path)
-          print("prepared ok: %d native, %d data" % (len(files), len(m["data"])))
+          print("prepared ok: %d native, %d data, %d preloads" % (len(files), len(m["data"]), len(preloads)))
           PY
 
       # ROM package self-check: never treat "the packer printed success" as proof.
