@@ -53,5 +53,60 @@
         "sha256": "d21bac297bffc68161aba0ad69aac85c75e642fa1a481fd34987f864782dacf4"
       }
     ]
+  },
+  {
+    "version": "v1.0.2",
+    "title": "VerseBox A9 v1.0.2",
+    "romVersion": "1.0.2",
+    "romKey": "android9@1.0.2",
+    "minAppVersionCode": 105,
+    "packSeconds": 34.9,
+    "files": [
+      {
+        "name": "versebox-android9-1.0.2.zip",
+        "bytes": 493420910,
+        "sha256": "bfe42cf35586761f438af606d6c30a2ff7285e3da7914a9c3dc6fe10c7852853"
+      },
+      {
+        "name": "versebox-android9-1.0.2-min.zip",
+        "bytes": 719,
+        "sha256": "158a0f7713108dd17323f8b39f2c38d9285461378be8ad65c565a7e3aa91bb3c"
+      },
+      {
+        "name": "apk-resident-libs-android9-1.0.2.tar",
+        "bytes": 860160,
+        "sha256": "e54e49355929d45e664b4e759b4ab81d1dd5f9e993de0b3be6b6ca74290f48af"
+      }
+    ],
+    "commit": "503a94fce58626fce6b598f4ae6d21a50532742f",
+    "runUrl": "https://github.com/GeometryOS/VerseBox-guest-runtime-a9/actions/runs/45948520283",
+    "publishedAt": "2026-11-27T05:57:12.137Z",
+    "assets": [
+      {
+        "name": "a9-runtime-v1.0.2.tar.gz",
+        "bytes": 493200967,
+        "sha256": "4b46a7f69a4cf0753eef72a4259df959bc2dc9a061a1e625153d2bd87484690a"
+      },
+      {
+        "name": "dist/android9@1.0.2/apk-resident-libs-android9-1.0.2.tar",
+        "bytes": 860160,
+        "sha256": "e54e49355929d45e664b4e759b4ab81d1dd5f9e993de0b3be6b6ca74290f48af"
+      },
+      {
+        "name": "dist/android9@1.0.2/pack-audit-intent.json",
+        "bytes": 654,
+        "sha256": "42b281b386b12a0769f33be530e3e10fed1ad0f27ae67afabad6d71f5df13d5a"
+      },
+      {
+        "name": "dist/android9@1.0.2/versebox-android9-1.0.2-min.zip",
+        "bytes": 719,
+        "sha256": "158a0f7713108dd17323f8b39f2c38d9285461378be8ad65c565a7e3aa91bb3c"
+      },
+      {
+        "name": "dist/android9@1.0.2/versebox-android9-1.0.2.zip",
+        "bytes": 493420910,
+        "sha256": "bfe42cf35586761f438af606d6c30a2ff7285e3da7914a9c3dc6fe10c7852853"
+      }
+    ]
   }
 ]
